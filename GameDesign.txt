@@ -1,0 +1,77 @@
+Game Design Document: Aetherium Machina
+1. Game Concept
+Title: Aetherium Machina: The Rust Plague of Chronosburg
+
+Genre: Vertical Bullet Hell (Danmaku) Shooter
+
+Theme: Steampunk    
+
+Core Concept: A fast-paced, pattern-based shooter that combines the mechanical precision of Touhou-style gameplay with a steampunk world of clockwork automatons, steam-powered contraptions, and aether-based technology. The player, a brilliant inventor, must pilot their custom-built "Aeronaut" craft through the malfunctioning city-state of Chronosburg to stop a mysterious "Rust Plague" that has driven its mechanical guardians insane.
+
+2. Storyline
+The city of Chronosburg is a marvel of the modern age, a metropolis powered by the Grand Chronometer—a colossal, sentient clockwork engine at its core. For centuries, the Chronometer has managed the city's functions through a legion of automatons, ensuring peace and prosperity.
+
+Suddenly, a mysterious affliction known as the "Rust Plague" sweeps through the city. It doesn't corrode metal, but rather the logic cores of the automatons, twisting their programming from civic duty to chaotic aggression. The city's districts descend into mechanical madness, with guardians turning on the citizens they were built to protect.
+
+The player takes on the role of Elara Vance, a young, maverick inventor. While the city's ruling council barricades themselves, Elara believes the source of the plague is a corruption within the Grand Chronometer itself. Boarding her personal craft, the "Starglider"—a marvel of brass, copper, and aether-technology—she sets off for the city's core. Her mission is to battle through the deranged automatons, confront the corrupted heart of the city, and purge the Rust Plague before Chronosburg tears itself apart.
+
+3. Core Gameplay Mechanics (Inspired by Touhou Project)
+The gameplay is built on a foundation of simple controls and deep, interconnected systems that reward precision and risk-taking.   
+
+Player Craft (The Starglider): The player's ship has a large, detailed sprite, but its vulnerability is a tiny, glowing "Aether Core" at its center. This core becomes visible when focusing.   
+
+Primary Fire: Holding the "Shoot" button unleashes a standard spread of projectiles.
+
+Focus Mode: Holding the "Focus" key (e.g., Shift) slows the player's movement for precise dodging, concentrates their fire into a powerful, narrow beam, and makes the Aether Core hitbox visible.   
+
+Pressure Release (Bombs): A limited-use defensive weapon. Activating it clears most bullets from the screen, grants brief invincibility, and deals heavy damage. The in-universe explanation is a sudden venting of the Starglider's boiler pressure.   
+
+Boiler Overload (Deathbombing): If the player triggers a Pressure Release within a few frames of being hit, they will consume a bomb but not lose a life. This requires anticipation and rewards high-level play.   
+
+Scrap Collection (Power-ups): Defeated enemies drop "Scrap Cogs" (red items) and "Brass Rivets" (blue point items). Collecting Scrap Cogs increases the player's "Output" (Power), enhancing their shot strength and adding clockwork "Option" drones that provide extra firepower.   
+
+Collection Conduit (Point of Collection): An invisible line near the top of the screen. Moving above this line causes all on-screen items to be automatically drawn to the player, creating a core risk-reward loop.   
+
+Gear-Grazing (Grazing): Flying close to enemy bullets without being hit increases a "Graze" counter, rewarding bonus points and encouraging risky, stylish play.   
+
+4. Score and User Interface (UI) Design
+The UI is designed to be functional while deeply embedded in the steampunk aesthetic, using materials like polished wood, brass, copper, and glass. All critical information is displayed on a sidebar to keep the main playfield clear.   
+
+UI Element	Steampunk Theming	Description
+Score	Engraved Brass Plate	A large, ornate brass plate at the top of the sidebar displays the player's current score in a serif, industrial-style font.
+Lives	Miniature Aeronaut Icons	Small, detailed icons of the player's "Starglider" craft represent remaining lives.
+Bombs	Steam Tank Gauges	Icons of small, cylindrical steam tanks represent the number of "Pressure Release" bombs available.
+Output (Power)	Aether-Pressure Dial	
+A large, circular pressure gauge with a needle that climbs from 0.00 to 4.00 as "Scrap Cogs" are collected. The dial glows brighter as power increases.   
+
+Graze	Ticker Counter	A mechanical, odometer-style counter that clicks upwards with each bullet grazed.
+Point Value	Vacuum Tube Display	The current value of "Brass Rivets" is shown on a Nixie tube-style display at the bottom of the sidebar.
+Boss Health	Geared Health Bar	
+The boss's health is represented by a long, horizontal bar filled with interlocking, rotating gears. As damage is dealt, the gears break and fall away from right to left. Each health bar segment for a "Schematic" phase is highlighted in glowing red.   
+
+5. Boss & Bullet Pattern Design Example
+Boss battles follow the Touhou structure of alternating between standard attacks ("light phases") and named special attacks ("heavy phases"). These special attacks are called "Schematics," representing the boss deploying a unique, complex invention.   
+
+Stage 3 Mid-Boss: The Foundry Foreman, Phineas Cogsworth
+
+Description: Once the diligent overseer of Chronosburg's great Foundry, Phineas is a large, humanoid automaton whose body is now fused with molten metal and twisted gears due to the Rust Plague. He attacks with industrial tools and superheated projectiles.
+
+Bullet Types: His projectiles are themed around a foundry: gears of various sizes, superheated rivets that glow orange, streams of molten slag, and puffs of scalding steam.
+
+Attack Patterns:
+
+Non-Schematic 1: Phineas fires aimed streams of fast-moving rivets at the player while releasing slower, rotating gears in a wide arc. This forces the player to make small, precise movements.
+
+Schematic 1 — Invention: "Rotary Gear Grinder"
+
+Visuals: The background changes to the glowing maw of a furnace. Phineas deploys two large, spinning gear-drones on either side of him.
+
+Pattern: The drones fire curving streams of small, saw-toothed bullets that spiral towards the center of the screen, creating a vortex pattern. The player must find the rhythm and move in a circular motion to navigate the gaps. This is a pattern designed to be "read" and solved through movement.   
+
+Non-Schematic 2: Phineas fires slow, large globules of molten slag that explode into smaller, faster bullets after a short delay, filling the screen with unpredictable shrapnel.
+
+Schematic 2 — Grand Design: "Unstable Boiler Eruption" (Survival Schematic)
+
+Visuals: Phineas overheats, glowing bright red and becoming invincible. A timer appears. The screen darkens, illuminated only by his glow.
+
+Pattern: The entire screen begins to fill with dense clouds of steam that obscure vision and drift slowly downwards. Simultaneously, random, fast-moving "shrapnel" bullets shoot from all edges of the screen. There is no safe spot; the player must constantly react and micro-dodge for the duration of the timer. Surviving the timer "captures" the Schematic for a large point bonus. This pattern is designed to create a claustrophobic, high-tension phase before the fight concludes. 
