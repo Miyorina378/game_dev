@@ -41,6 +41,159 @@ def draw_text(surf, text, size, x, y):
     text_rect.midtop = (x, y)
     surf.blit(text_surface, text_rect)
 
+class Weapon:
+    def __init__(self, name, weapon_type):
+        self.name = name
+        self.weapon_type = weapon_type
+
+    def shoot(self, player):
+        pass
+
+class WeaponManager:
+    def __init__(self, player):
+        self.player = player
+        self.weapons = {
+            "active": [DefaultWeapon(), BeamCannon()],
+            "passive": [HomingMissiles()]
+        }
+        self.active_weapon_index = 0
+
+    def shoot_active(self):
+        self.weapons["active"][self.active_weapon_index].shoot(self.player)
+
+    def shoot_passive(self):
+        for weapon in self.weapons["passive"]:
+            weapon.shoot(self.player)
+
+    def switch_weapon(self):
+        self.active_weapon_index = (self.active_weapon_index + 1) % len(self.weapons["active"])
+
+class DefaultWeapon(Weapon):
+    def __init__(self):
+        super().__init__("Default", "active")
+
+    def shoot(self, player):
+        now = pygame.time.get_ticks()
+        if now - player.last_shot > player.shoot_delay:
+            player.last_shot = now
+            if not pygame.mixer.Channel(0).get_busy():
+                pygame.mixer.Channel(0).play(player.shooting_sound)
+            if player.focused:
+                all_sprites.add(Bullet(player.rect.centerx, player.rect.top, 0, -10, "player"))
+                bullets.add(all_sprites.sprites()[-1])
+            else:
+                all_sprites.add(Bullet(player.rect.centerx, player.rect.top, 0, -7, "player"),
+                                Bullet(player.rect.left, player.rect.centery, -2, -7, "player"),
+                                Bullet(player.rect.right, player.rect.centery, 2, -7, "player"))
+                bullets.add(all_sprites.sprites()[-3:])
+
+class Beam(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        super().__init__()
+        self.image = pygame.Surface([40, SCREEN_HEIGHT])
+        self.image.fill(RED)
+        self.rect = self.image.get_rect(midbottom=(x, y))
+        self.spawn_time = pygame.time.get_ticks()
+
+    def update(self):
+        if pygame.time.get_ticks() - self.spawn_time > 200:
+            self.kill()
+
+class BeamCannon(Weapon):
+    def __init__(self):
+        super().__init__("Beam Cannon", "active")
+        self.last_shot = 0
+        self.shoot_delay = 2000
+
+    def shoot(self, player):
+        now = pygame.time.get_ticks()
+        if now - self.last_shot > self.shoot_delay:
+            self.last_shot = now
+            beam = Beam(player.rect.centerx, player.rect.top)
+            all_sprites.add(beam)
+            beams.add(beam)
+
+class Bullet(pygame.sprite.Sprite):
+    def __init__(self, x, y, speedx, speedy, bullet_type="player"):
+        super().__init__()
+        self.bullet_type = bullet_type
+        if self.bullet_type == "player":
+            self.image = pygame.Surface([5, 10])
+            self.image.fill(WHITE)
+        elif self.bullet_type == "enemy_a":
+            self.image = pygame.Surface([8, 8])
+            pygame.draw.circle(self.image, RED, (4, 4), 4)
+            self.image.set_colorkey(BLACK)
+        elif self.bullet_type == "enemy_b":
+            self.image = pygame.Surface([10, 10])
+            self.image.fill(GREEN)
+        elif self.bullet_type == "enemy_c":
+            self.image = pygame.Surface([12, 12])
+            self.image.fill(BLUE)
+        elif self.bullet_type == "boss_bullet":
+            self.image = pygame.image.load("media/images/bullet1.png").convert_alpha()
+
+        self.rect = self.image.get_rect(center=(x, y))
+        self.mask = pygame.mask.from_surface(self.image)
+        self.speedx = speedx
+        self.speedy = speedy
+        self.grazed = False
+
+    def update(self):
+        self.rect.x += self.speedx
+        self.rect.y += self.speedy
+        if not screen.get_rect().colliderect(self.rect):
+            self.kill()
+
+class HomingMissile(Bullet):
+    def __init__(self, x, y, speedx, speedy):
+        self.image = pygame.Surface([7, 15])
+        self.image.fill(BLUE)
+        super().__init__(x, y, speedx, speedy, "homing_missile")
+        self.start_pos = pygame.math.Vector2(x, y)
+        self.target = None
+        self.last_direction = pygame.math.Vector2(0, 0)
+
+    def update(self):
+        if self.target and self.target.alive():
+            direction = pygame.math.Vector2(self.target.rect.center) - pygame.math.Vector2(self.rect.center)
+            if direction.length() > 0:
+                direction.normalize_ip()
+                self.last_direction = direction
+            self.rect.x += direction.x * 5
+            self.rect.y += direction.y * 5
+        elif self.target and not self.target.alive():
+            self.rect.x += self.last_direction.x * 5
+            self.rect.y += self.last_direction.y * 5
+        else:
+            self.rect.x += self.speedx
+            self.rect.y += self.speedy
+
+        if not self.target and self.start_pos.distance_to(self.rect.center) > 300:
+            closest_enemy = None
+            closest_distance = float('inf')
+            for enemy in enemies:
+                distance = pygame.math.Vector2(self.rect.center).distance_to(enemy.rect.center)
+                if distance < closest_distance:
+                    closest_distance = distance
+                    closest_enemy = enemy
+            self.target = closest_enemy
+
+class HomingMissiles(Weapon):
+    def __init__(self):
+        super().__init__("Homing Missiles", "passive")
+        self.last_shot = 0
+        self.shoot_delay = 2000
+
+    def shoot(self, player):
+        now = pygame.time.get_ticks()
+        if now - self.last_shot > self.shoot_delay:
+            self.last_shot = now
+            missile1 = HomingMissile(player.rect.left, player.rect.centery, -2, -7)
+            missile2 = HomingMissile(player.rect.right, player.rect.centery, 2, -7)
+            all_sprites.add(missile1, missile2)
+            bullets.add(missile1, missile2)
+
 class Player(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
@@ -68,6 +221,7 @@ class Player(pygame.sprite.Sprite):
         self.stage = 1
         self.shooting_sound = pygame.mixer.Sound("media/sfx/rapidFireLoop.wav")
         self.shooting_sound.set_volume(0.5)
+        self.weapon_manager = WeaponManager(self)
 
     def update(self):
         keys = pygame.key.get_pressed()
@@ -106,19 +260,8 @@ class Player(pygame.sprite.Sprite):
                 pass
 
     def shoot(self):
-        now = pygame.time.get_ticks()
-        if now - self.last_shot > self.shoot_delay:
-            self.last_shot = now
-            if not pygame.mixer.Channel(0).get_busy():
-                pygame.mixer.Channel(0).play(self.shooting_sound)
-            if self.focused:
-                all_sprites.add(Bullet(self.rect.centerx, self.rect.top, 0, -10, "player"))
-                bullets.add(all_sprites.sprites()[-1])
-            else:
-                all_sprites.add(Bullet(self.rect.centerx, self.rect.top, 0, -7, "player"),
-                                Bullet(self.rect.left, self.rect.centery, -2, -7, "player"),
-                                Bullet(self.rect.right, self.rect.centery, 2, -7, "player"))
-                bullets.add(all_sprites.sprites()[-3:])
+        self.weapon_manager.shoot_active()
+        self.weapon_manager.shoot_passive()
 
     def use_bomb(self):
         if self.bombs > 0:
@@ -161,12 +304,17 @@ class Enemy(pygame.sprite.Sprite):
         self.shoot_delay = 1000
         self.last_shot = pygame.time.get_ticks()
         self.health = 10
+        self.debuffs = {}
 
     def update(self):
         self.move()
         self.shoot()
         if self.health <= 0:
             self.kill()
+
+        for debuff, data in list(self.debuffs.items()):
+            if pygame.time.get_ticks() - data["start_time"] > data["duration"]:
+                del self.debuffs[debuff]
 
     def move(self):
         self.rect.y += self.speedy
@@ -242,6 +390,7 @@ class Boss(pygame.sprite.Sprite):
         self.patterns = ['non_schematic_1', 'schematic_1']
         self.current_pattern_index = 0
         self.pattern_start_time = pygame.time.get_ticks()
+        self.debuffs = {}
 
     def update(self):
         now = pygame.time.get_ticks()
@@ -249,6 +398,10 @@ class Boss(pygame.sprite.Sprite):
             self.current_pattern_index = (self.current_pattern_index + 1) % len(self.patterns)
             self.pattern_start_time = now
         getattr(self, self.patterns[self.current_pattern_index])()
+
+        for debuff, data in list(self.debuffs.items()):
+            if pygame.time.get_ticks() - data["start_time"] > data["duration"]:
+                del self.debuffs[debuff]
 
     def non_schematic_1(self):
         if pygame.time.get_ticks() % 200 < 20:
@@ -614,7 +767,7 @@ bullets = pygame.sprite.Group()
 enemies = pygame.sprite.Group()
 enemy_bullets = pygame.sprite.Group()
 powerups = pygame.sprite.Group()
-bosses = pygame.sprite.Group()
+beams = pygame.sprite.Group()
 player = Player()
 
 def game_loop(new_game=True):
@@ -629,6 +782,7 @@ def game_loop(new_game=True):
     all_sprites = pygame.sprite.Group(player)
     player_sprite = pygame.sprite.GroupSingle(player)
     bullets, enemies, enemy_bullets, powerups, bosses = (pygame.sprite.Group() for _ in range(5))
+    beams.empty()
 
     stage_manager = StageManager(player, all_sprites, enemies, enemy_bullets, bosses)
     game_over = False
@@ -648,6 +802,7 @@ def game_loop(new_game=True):
                 running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_x: player.use_bomb()
+                if event.key == pygame.K_q: player.weapon_manager.switch_weapon()
                 if event.key == pygame.K_ESCAPE: 
                     pygame.mixer.Channel(0).stop()
                     save_game(player); 
@@ -656,17 +811,56 @@ def game_loop(new_game=True):
         all_sprites.update()
         stage_manager.update()
 
-        hits = pygame.sprite.groupcollide(enemies, bullets, True, True)
-        for hit in hits:
-            player.score += 100
-            powerup = PowerUp(hit.rect.center)
-            all_sprites.add(powerup)
-            powerups.add(powerup)
+        beam_hits = pygame.sprite.groupcollide(enemies, beams, False, False)
+        for enemy, hit_beams in beam_hits.items():
+            for beam in hit_beams:
+                enemy.debuffs["damage_vulnerability"] = {"start_time": pygame.time.get_ticks(), "duration": 10000}
+                enemy.health -= 1
+            if enemy.health <= 0:
+                player.score += 100
+                powerup = PowerUp(enemy.rect.center)
+                all_sprites.add(powerup)
+                powerups.add(powerup)
+                enemy.kill()
+
+        hits = pygame.sprite.groupcollide(enemies, bullets, False, True)
+        for enemy, hit_bullets in hits.items():
+            for bullet in hit_bullets:
+                if isinstance(bullet, HomingMissile):
+                    damage = 5
+                    if "damage_vulnerability" in enemy.debuffs:
+                        damage *= 1.5
+                    enemy.health -= damage
+                else:
+                    damage = 10
+                    if "damage_vulnerability" in enemy.debuffs:
+                        damage *= 1.5
+                    enemy.health -= damage
+
+            if enemy.health <= 0:
+                player.score += 100
+                powerup = PowerUp(enemy.rect.center)
+                all_sprites.add(powerup)
+                powerups.add(powerup)
+                enemy.kill()
 
         if bosses:
+            boss_beam_hits = pygame.sprite.groupcollide(bosses, beams, False, False)
+            for boss, hit_beams in boss_beam_hits.items():
+                for beam in hit_beams:
+                    boss.debuffs["damage_vulnerability"] = {"start_time": pygame.time.get_ticks(), "duration": 10000}
+                    boss.health -= 1
+                if boss.health <= 0:
+                    boss.kill()
+                    player.score += 10000
+                    save_game(player)
+
             hits = pygame.sprite.groupcollide(bosses, bullets, False, True)
             for boss, hit_bullets in hits.items():
-                boss.health -= 10 * len(hit_bullets)
+                damage = 10 * len(hit_bullets)
+                if "damage_vulnerability" in boss.debuffs:
+                    damage *= 1.5
+                boss.health -= damage
                 if boss.health <= 0:
                     boss.kill()
                     player.score += 10000
@@ -700,7 +894,36 @@ def game_loop(new_game=True):
         screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
         pygame.display.flip()
 
+def splash_screen():
+    splash_image = pygame.image.load("media/images/splashScreen.png").convert_alpha()
+    splash_image = pygame.transform.scale(splash_image, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT))
+    title_image = pygame.image.load("media/images/titleImage.jpg").convert_alpha()
+    title_image = pygame.transform.scale(title_image, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT))
+
+    # Fade in splash
+    for alpha in range(0, 256, 5):
+        splash_image.set_alpha(alpha)
+        render_surface.fill(BLACK)
+        render_surface.blit(splash_image, (0, 0))
+        screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
+        pygame.display.flip()
+        pygame.time.delay(30)
+
+    pygame.time.delay(2000)
+
+    # Fade out splash and fade in title
+    for alpha in range(0, 256, 5):
+        splash_image.set_alpha(255 - alpha)
+        title_image.set_alpha(alpha)
+        render_surface.fill(BLACK)
+        render_surface.blit(splash_image, (0, 0))
+        render_surface.blit(title_image, (0, 0))
+        screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
+        pygame.display.flip()
+        pygame.time.delay(30)
+
 if __name__ == "__main__":
+    splash_screen()
     while True:
         choice = title_screen()
         if choice == "NEW GAME":
