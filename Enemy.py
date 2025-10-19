@@ -185,50 +185,65 @@ class Boss(pygame.sprite.Sprite):
         self.player = player
         self.all_sprites = all_sprites
         self.enemy_bullets = enemy_bullets
-        self.schematic_2_rotation = 0
 
         # Schematic 2 state variables
+        self.schematic_2_active = False  # NEW: Track if schematic 2 is active
         self.schematic_2_timer = 0
         self.schematic_2_pattern_state = "spin_left"
         self.schematic_2_state_timer = 0
         self.schematic_2_rotation_angle = 0
-        self.SPIN_LEFT_DURATION = 120
-        self.PAUSE_DURATION = 30
-        self.SPIN_RIGHT_DURATION = 120
-        self.PAUSE_RIGHT_DURATION = 30
+        self.SPIN_LEFT_DURATION = 120  # 2 seconds at 60 FPS
+        self.PAUSE_DURATION = 30       # 0.5 seconds at 60 FPS
+        self.SPIN_RIGHT_DURATION = 120 # 2 seconds at 60 FPS
 
     def update(self, frame_count):
-        if self.health / self.max_health < 0.25:
-            self.schematic_2()
-            return
+        # Check if we should activate schematic 2
+        if self.health / self.max_health < 0.25 and not self.schematic_2_active:
+            self.schematic_2_active = True
+            self.schematic_2_timer = 0
+            self.schematic_2_state_timer = 0
+            self.schematic_2_rotation_angle = 0
+            self.schematic_2_pattern_state = "spin_left"
+        
+        # If schematic 2 is active, use it exclusively
+        if self.schematic_2_active:
+            self.schematic_2(frame_count)
+        else:
+            # Normal pattern rotation
+            if frame_count - self.pattern_start_time > 600:
+                self.current_pattern_index = (self.current_pattern_index + 1) % len(self.patterns)
+                self.pattern_start_time = frame_count
+            getattr(self, self.patterns[self.current_pattern_index])(frame_count)
 
-        if frame_count - self.pattern_start_time > 600:
-            self.current_pattern_index = (self.current_pattern_index + 1) % len(self.patterns)
-            self.pattern_start_time = frame_count
-        getattr(self, self.patterns[self.current_pattern_index])(frame_count)
-
+        # Handle debuffs
         for debuff, data in list(self.debuffs.items()):
             if frame_count - data["start_time"] > data["duration"]:
                 del self.debuffs[debuff]
 
     def non_schematic_1(self, frame_count):
         if frame_count % 12 < 2:
-            angle = math.atan2(self.player.rect.centery - self.rect.centery, self.player.rect.centerx - self.rect.centerx)
+            angle = math.atan2(self.player.rect.centery - self.rect.centery, 
+                             self.player.rect.centerx - self.rect.centerx)
             speed = 5
-            bullet = Bullet(self.rect.centerx, self.rect.centery, math.cos(angle) * speed, math.sin(angle) * speed, "boss_bullet")
+            bullet = Bullet(self.rect.centerx, self.rect.centery, 
+                          math.cos(angle) * speed, math.sin(angle) * speed, 
+                          "boss_bullet")
             self.all_sprites.add(bullet)
             self.enemy_bullets.add(bullet)
 
     def schematic_1(self, frame_count):
         if frame_count % 6 < 2:
             for _ in range(15):
-                angle = random.uniform(0, 2 * math.pi) # Random angle
-                speed = random.uniform(1, 3) # Slower random speed
-                bullet = Bullet(self.rect.centerx, self.rect.centery, math.cos(angle) * speed, math.sin(angle) * speed, "boss_bullet")
+                angle = random.uniform(0, 2 * math.pi)
+                speed = random.uniform(1, 3)
+                bullet = Bullet(self.rect.centerx, self.rect.centery, 
+                              math.cos(angle) * speed, math.sin(angle) * speed, 
+                              "boss_bullet")
                 self.all_sprites.add(bullet)
                 self.enemy_bullets.add(bullet)
 
-    def schematic_2(self):
+    def schematic_2(self, frame_count):
+        """Spinning wall pattern - alternates left/right with pauses"""
         self.schematic_2_timer += 1
         self.schematic_2_state_timer += 1
         
@@ -239,34 +254,43 @@ class Boss(pygame.sprite.Sprite):
                 self.schematic_2_state_timer = 0
         
         elif self.schematic_2_pattern_state == "pause_left":
-                    if self.schematic_2_state_timer >= self.PAUSE_DURATION:
-                        self.schematic_2_pattern_state = "spin_right"
-                        self.schematic_2_state_timer = 0
-                
+            # No bullets during pause
+            if self.schematic_2_state_timer >= self.PAUSE_DURATION:
+                self.schematic_2_pattern_state = "spin_right"
+                self.schematic_2_state_timer = 0
+        
         elif self.schematic_2_pattern_state == "spin_right":
-                    self.spinning_pattern(direction=1)
-                    if self.schematic_2_state_timer >= self.SPIN_RIGHT_DURATION:
-                        self.schematic_2_pattern_state = "pause_right"
-                        self.schematic_2_state_timer = 0
-                
+            self.spinning_pattern(direction=1)
+            if self.schematic_2_state_timer >= self.SPIN_RIGHT_DURATION:
+                self.schematic_2_pattern_state = "pause_right"
+                self.schematic_2_state_timer = 0
+        
         elif self.schematic_2_pattern_state == "pause_right":
-                    if self.schematic_2_state_timer >= self.PAUSE_DURATION:
-                        self.schematic_2_pattern_state = "spin_left"
-                        self.schematic_2_state_timer = 0
-                        self.schematic_2_rotation_angle = 0
+            # No bullets during pause
+            if self.schematic_2_state_timer >= self.PAUSE_DURATION:
+                self.schematic_2_pattern_state = "spin_left"
+                self.schematic_2_state_timer = 0
+                # Optional: reset rotation for clean loop
+                # self.schematic_2_rotation_angle = 0
 
     def spinning_pattern(self, direction):
-        if self.schematic_2_timer % 3 == 0:
-            self.schematic_2_rotation_angle += direction * 0.015
+        """Creates a spinning wall of bullets"""
+        if self.schematic_2_timer % 3 == 0:  # Fire every 3 frames
+            # Slower rotation for dodgeable gaps
+            self.schematic_2_rotation_angle += direction * 0.03
+            
             num_bullets = 20
             for i in range(num_bullets):
                 angle = self.schematic_2_rotation_angle + (i * 2 * math.pi / num_bullets)
-                speed = 1.2
+                speed = 1.2  # Slow speed for wall effect
                 vx = math.cos(angle) * speed
                 vy = math.sin(angle) * speed
-                bullet = Bullet(self.rect.centerx, self.rect.centery, vx, vy, "boss_bullet")
+                
+                bullet = Bullet(self.rect.centerx, self.rect.centery, 
+                              vx, vy, "boss_bullet")
                 self.all_sprites.add(bullet)
                 self.enemy_bullets.add(bullet)
+
 
 
 
