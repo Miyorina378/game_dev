@@ -1,7 +1,7 @@
 import json
 
 SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
+SCREEN_HEIGHT = 800
 UI_WIDTH = 250
 
 class Settings:

@@ -4,7 +4,8 @@ import math
 import json
 import os
 from Enemy import Bullet, HomingMissile
-from stages.stage1 import Stage1, Stage2, Stage3, Stage4, Stage5, Stage6, Stage7
+from stages.stage1 import Stage1
+from stages.stage2 import Stage2
 from config import SCREEN_WIDTH, SCREEN_HEIGHT, UI_WIDTH, settings
 
 pygame.mixer.pre_init(44100, -16, 2, 2048)
@@ -13,7 +14,7 @@ pygame.mixer.init()
 
 # Screen dimensions
 NATIVE_WIDTH = 800
-NATIVE_HEIGHT = 600
+NATIVE_HEIGHT = 800
 
 # Colors
 BLACK = (0, 0, 0)
@@ -50,12 +51,12 @@ pygame.mixer.music.set_volume(settings.music_volume)
 
 SAVE_FILE = "savegame.json"
 
-def draw_text(surf, text, size, x, y):
+def draw_text(surface, text, size, x, y, color=(255, 255, 255)):
     font = pygame.font.Font(font_name, size)
-    text_surface = font.render(text, True, WHITE)
+    text_surface = font.render(text, True, color)
     text_rect = text_surface.get_rect()
     text_rect.midtop = (x, y)
-    surf.blit(text_surface, text_rect)
+    surface.blit(text_surface, text_rect)
 
 class Weapon:
     def __init__(self, name, weapon_type):
@@ -73,6 +74,11 @@ class WeaponManager:
             "passive": [HomingMissiles(enemies)]
         }
         self.active_weapon_index = 0
+
+    def set_bosses(self, bosses):
+        for weapon in self.weapons["passive"]:
+            if isinstance(weapon, HomingMissiles):
+                weapon.set_bosses(bosses)
 
     def shoot_active(self, frame_count):
         self.weapons["active"][self.active_weapon_index].shoot(self.player, frame_count)
@@ -158,14 +164,53 @@ class DefaultWeapon(Weapon):
 class Beam(pygame.sprite.Sprite):
     def __init__(self, x, y, frame_count):
         super().__init__()
-        self.image = pygame.Surface([40, SCREEN_HEIGHT])
-        self.image.fill(RED)
-        self.rect = self.image.get_rect(midbottom=(x, y))
+        self.width = 40
+        self.height = SCREEN_HEIGHT
         self.spawn_time = frame_count
-
+        self.lifetime = 12
+        self.x = x
+        self.y = y
+        
+        # Create the beam with transparency support
+        self.image = pygame.Surface([self.width, self.height], pygame.SRCALPHA)
+        self.rect = self.image.get_rect(midbottom=(x, y))
+        
     def update(self, frame_count):
-        if frame_count - self.spawn_time > 12:
+        age = frame_count - self.spawn_time
+        
+        if age > self.lifetime:
             self.kill()
+            return
+        
+        # Calculate fade progress (1.0 at start, 0.0 at end)
+        fade_progress = 1.0 - (age / self.lifetime)
+        
+        # Clear the surface
+        self.image.fill((0, 0, 0, 0))
+        
+        # Draw gradient beam with multiple layers for glow effect
+        for i in range(3):
+            # Outer glow (wider, more transparent)
+            if i == 0:
+                width = self.width
+                alpha = int(100 * fade_progress)
+                color = (255, 100, 100, alpha)
+            # Middle layer
+            elif i == 1:
+                width = self.width * 0.6
+                alpha = int(180 * fade_progress)
+                color = (255, 50, 50, alpha)
+            # Core (brightest, narrowest)
+            else:
+                width = self.width * 0.3
+                alpha = int(255 * fade_progress)
+                color = (255, 255, 200, alpha)  # Bright yellowish core
+            
+            # Draw the layer
+            layer_surface = pygame.Surface([width, self.height], pygame.SRCALPHA)
+            layer_surface.fill(color)
+            offset_x = (self.width - width) // 2
+            self.image.blit(layer_surface, (offset_x, 0))
 
 class BeamCannon(Weapon):
     def __init__(self):
@@ -177,6 +222,8 @@ class BeamCannon(Weapon):
     def shoot(self, player, frame_count):
         if frame_count - self.last_shot > self.shoot_delay:
             self.last_shot = frame_count
+            if not pygame.mixer.Channel(1).get_busy():
+                pygame.mixer.Channel(1).play(self.beam_sound)
             beam = Beam(player.rect.centerx, player.rect.top, frame_count)
             all_sprites.add(beam)
             beams.add(beam)
@@ -187,14 +234,18 @@ class HomingMissiles(Weapon):
     def __init__(self, enemies):
         super().__init__("Homing Missiles", "passive")
         self.last_shot = 0
-        self.shoot_delay = 120
+        self.shoot_delay = 6
         self.enemies = enemies
+        self.bosses = None
+
+    def set_bosses(self, bosses):
+        self.bosses = bosses
 
     def shoot(self, player, frame_count):
         if frame_count - self.last_shot > self.shoot_delay:
             self.last_shot = frame_count
-            missile1 = HomingMissile(player.rect.left, player.rect.centery, -2, -7, self.enemies)
-            missile2 = HomingMissile(player.rect.right, player.rect.centery, 2, -7, self.enemies)
+            missile1 = HomingMissile(player.rect.left - 20, player.rect.centery, -2, -7, self.enemies, self.bosses)
+            missile2 = HomingMissile(player.rect.right + 20, player.rect.centery, 2, -7, self.enemies, self.bosses)
             all_sprites.add(missile1, missile2)
             bullets.add(missile1, missile2)
 
@@ -242,7 +293,7 @@ class Player(pygame.sprite.Sprite):
 
         if self.focused:
             hitbox_surface = pygame.Surface(self.rect.size, pygame.SRCALPHA)
-            pygame.draw.rect(hitbox_surface, (255, 255, 255, 255), (self.rect.width // 2 - 6, self.rect.height // 2 - 6, 12, 12))
+            pygame.draw.rect(hitbox_surface, (255, 255, 255, 255), (self.rect.width // 2 - 4, self.rect.height // 2 - 4, 8, 8))
             self.mask = pygame.mask.from_surface(hitbox_surface)
         else:
             self.mask = pygame.mask.from_surface(self.image)
@@ -322,7 +373,7 @@ class StageManager:
         self.enemies = enemies
         self.enemy_bullets = enemy_bullets
         self.bosses = bosses
-        self.stages = [Stage1, Stage2, Stage3, Stage4, Stage5, Stage6, Stage7]
+        self.stages = [Stage1, Stage2]
         self.current_stage_index = self.player.stage - 1
         self.current_stage = self.stages[self.current_stage_index](self.player, self.all_sprites, self.enemies, self.enemy_bullets, self.bosses)
 
@@ -439,16 +490,79 @@ def draw_ui(player):
     global fullscreen_mode
     if fullscreen_mode:
         return
-    ui_surface = pygame.Surface((UI_WIDTH, SCREEN_HEIGHT))
-    ui_surface.fill((50, 50, 50))
-    draw_text(ui_surface, f"Score: {player.score}", 18, UI_WIDTH / 2, 10)
-    draw_text(ui_surface, f"Lives: {player.lives}", 18, UI_WIDTH / 2, 40)
-    draw_text(ui_surface, f"Bombs: {player.bombs}", 18, UI_WIDTH / 2, 70)
-    draw_text(ui_surface, f"Power: {player.power}", 18, UI_WIDTH / 2, 100)
-    draw_text(ui_surface, f"Graze: {player.graze}", 18, UI_WIDTH / 2, 130)
-    draw_text(ui_surface, f"Stage: {player.stage}", 18, UI_WIDTH / 2, 160)
+    
+    # Create UI surface with alpha channel for transparency
+    ui_surface = pygame.Surface((UI_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    
+    # Define aura width
+    aura_width = 5
+    
+    # Fill only the area AFTER the aura with dark background
+    background_rect = pygame.Rect(aura_width, 0, UI_WIDTH - aura_width, SCREEN_HEIGHT)
+    pygame.draw.rect(ui_surface, (30, 30, 35), background_rect)
+    
+    # Draw gradient aura from light gray to dark gray
+    start_color = (245, 245, 245)  # Light gray (near white)
+    end_color = (45, 45, 55)        # Dark gray (UI box color)
+    
+    for i in range(aura_width):
+        # Create gradient from light to dark
+        progress = i / aura_width  # 0.0 at left edge, 1.0 at right edge
+        
+        # Interpolate between start and end colors
+        r = int(start_color[0] + (end_color[0] - start_color[0]) * progress)
+        g = int(start_color[1] + (end_color[1] - start_color[1]) * progress)
+        b = int(start_color[2] + (end_color[2] - start_color[2]) * progress)
+        
+        glow_surface = pygame.Surface((2, SCREEN_HEIGHT))
+        glow_surface.fill((r, g, b))
+        ui_surface.blit(glow_surface, (i, 0))
+    
+    # Define shadow box function for minimalist style with OUTER shadow
+    def draw_shadow_box(surface, x, y, width, height, shadow_offset=4):
+        # Outer shadow (drawn first, behind the box)
+        shadow_rect = pygame.Rect(x + shadow_offset, y + shadow_offset, width, height)
+        pygame.draw.rect(surface, (10, 10, 15), shadow_rect, border_radius=8)
+        
+        # Main box on top of shadow
+        main_rect = pygame.Rect(x, y, width, height)
+        pygame.draw.rect(surface, (45, 45, 55), main_rect, border_radius=8)
+        
+        # Subtle outer border for definition
+        pygame.draw.rect(surface, (70, 70, 80), main_rect, 1, border_radius=8)
+        
+        return main_rect
+    
+    # Offset for UI elements to start after the glow
+    ui_start_x = aura_width + 10
+    ui_box_width = UI_WIDTH - ui_start_x - 15
+    
+    # Stats container
+    stats_box = draw_shadow_box(ui_surface, ui_start_x, 15, ui_box_width, 180)
+    
+    # Draw stats with better spacing
+    y_offset = 30
+    spacing = 28
+    text_center_x = ui_start_x + ui_box_width / 2
+    
+    draw_text(ui_surface, f"SCORE", 14, text_center_x, y_offset, color=(150, 150, 160))
+    draw_text(ui_surface, f"{player.score}", 20, text_center_x, y_offset + 15, color=(255, 255, 255))
+    
+    draw_text(ui_surface, f"LIVES: {player.lives}", 16, text_center_x, y_offset + spacing * 2, color=(200, 200, 210))
+    draw_text(ui_surface, f"BOMBS: {player.bombs}", 16, text_center_x, y_offset + spacing * 3, color=(200, 200, 210))
+    draw_text(ui_surface, f"POWER: {player.power}", 16, text_center_x, y_offset + spacing * 4, color=(200, 200, 210))
+    draw_text(ui_surface, f"GRAZE: {player.graze}", 16, text_center_x, y_offset + spacing * 5, color=(200, 200, 210))
+    
+    # Stage indicator box
+    stage_box = draw_shadow_box(ui_surface, ui_start_x, 210, ui_box_width, 50)
+    draw_text(ui_surface, f"STAGE {player.stage}", 18, text_center_x, 235, color=(255, 255, 255))
+    
+    # Weapon UI box
+    weapon_box_y = 280
+    draw_shadow_box(ui_surface, ui_start_x, weapon_box_y, ui_box_width, 120)
     player.weapon_ui.draw(ui_surface)
-    render_surface.blit(ui_surface, (SCREEN_WIDTH, 0))
+    
+    render_surface.blit(ui_surface, (SCREEN_HEIGHT, 0))
 
 def draw_boss_health_bar(surf, x, y, pct):
     if pct < 0: pct = 0
@@ -772,6 +886,7 @@ def game_loop(new_game=True):
     all_sprites = pygame.sprite.Group(player)
     player_sprite = pygame.sprite.GroupSingle(player)
     bullets, enemy_bullets, powerups, bosses = (pygame.sprite.Group() for _ in range(4))
+    player.weapon_manager.set_bosses(bosses)
     beams.empty()
 
     stage_manager = StageManager(player, all_sprites, enemies, enemy_bullets, bosses)
@@ -818,7 +933,7 @@ def game_loop(new_game=True):
             if welcome_animation.finished:
                 if not stage_music_playing:
                     pygame.mixer.music.load("media/OST/stage1-normal.wav")
-                    pygame.mixer.music.set_volume(0.25)
+                    pygame.mixer.music.set_volume(1)
                     pygame.mixer.music.play(-1)
                     stage_music_playing = True
 
@@ -842,7 +957,7 @@ def game_loop(new_game=True):
         for enemy, hit_bullets in hits.items():
             for bullet in hit_bullets:
                 if isinstance(bullet, HomingMissile):
-                    damage = 5
+                    damage = 2.5
                     if "damage_vulnerability" in enemy.debuffs:
                         damage *= 1.5
                     enemy.health -= damage
@@ -871,22 +986,41 @@ def game_loop(new_game=True):
                 if boss.health <= 0:
                     boss.kill()
                     player.score += 10000
-                    save_game(player)
+                    # Stage Complete Logic
+                    draw_text(render_surface, "Stage Complete!!", 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
+                    screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
+                    pygame.display.flip()
+                    pygame.time.delay(2000) # Display message for 2 seconds
+                    fade_to_black(500) # Fade out
+                    stage_manager.next_stage()
+                    return # Exit current game_loop to start new stage
 
             hits = pygame.sprite.groupcollide(bosses, bullets, False, True)
             for boss, hit_bullets in hits.items():
-                damage = 10 * len(hit_bullets)
-                if "damage_vulnerability" in boss.debuffs:
-                    damage *= 1.5
-                
-                if boss.health / boss.max_health < 0.25:
-                    damage *= 0.1
+                for bullet in hit_bullets:
+                    if isinstance(bullet, HomingMissile):
+                        damage = 2.5
+                    else:
+                        damage = 10
 
-                boss.health -= damage
+                    if "damage_vulnerability" in boss.debuffs:
+                        damage *= 1.5
+                    
+                    if boss.health / boss.max_health < 0.25:
+                        damage *= 0.1
+
+                    boss.health -= damage
                 if boss.health <= 0:
                     boss.kill()
                     player.score += 10000
-                    save_game(player)
+                    # Stage Complete Logic
+                    draw_text(render_surface, "Stage Complete!!", 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
+                    screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
+                    pygame.display.flip()
+                    pygame.time.delay(2000) # Display message for 2 seconds
+                    fade_to_black(500) # Fade out
+                    stage_manager.next_stage()
+                    return # Exit current game_loop to start new stage
 
         if pygame.sprite.spritecollide(player, enemy_bullets, True, pygame.sprite.collide_mask) and not player.invincible:
             player.die(frame_count)
@@ -907,7 +1041,7 @@ def game_loop(new_game=True):
                 player.graze += 1
                 bullet.grazed = True
 
-        game_surface.fill(BLACK)
+        game_surface.fill(stage_manager.current_stage.background_color)
         all_sprites.draw(game_surface)
         if welcome_animation:
             welcome_animation.draw(game_surface)

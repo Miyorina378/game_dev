@@ -9,9 +9,11 @@ WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
+CYAN = (100, 255, 255)
+PURPLE = (200, 100, 255)
 
 class Bullet(pygame.sprite.Sprite):
-    def __init__(self, x, y, speedx, speedy, bullet_type="player"):
+    def __init__(self, x, y, speedx, speedy, bullet_type="player", color=None):
         super().__init__()
         self.bullet_type = bullet_type
         if self.bullet_type == "player":
@@ -27,27 +29,44 @@ class Bullet(pygame.sprite.Sprite):
             self.image = pygame.Surface([12, 12])
             self.image.fill(BLUE)
         elif self.bullet_type == "boss_bullet":
-            self.image = pygame.image.load("media/images/bullet1.png").convert_alpha()
+            self.image = pygame.Surface([10, 10], pygame.SRCALPHA)
+            pygame.draw.circle(self.image, RED, (5, 5), 5)
+            self.image.set_colorkey(BLACK)
         elif self.bullet_type == "emerald_bullet":
             self.image = pygame.image.load("media/images/emerald-bullet.png").convert_alpha()
         elif self.bullet_type == "homing_missile":
             self.image = pygame.Surface([7, 15])
             self.image.fill(BLUE)
+        elif self.bullet_type == "boss_schematic_bullet":
+            self.image = pygame.Surface([14, 14], pygame.SRCALPHA)
+            pygame.draw.circle(self.image, color, (7, 7), 7)
+            pygame.draw.circle(self.image, WHITE, (7, 7), 3)
+            self.image.set_colorkey(BLACK)
 
         self.rect = self.image.get_rect(center=(x, y))
         self.mask = pygame.mask.from_surface(self.image)
+        
+        # Store precise float position (use CENTER coordinates)
+        self.x = float(x)
+        self.y = float(y)
         self.speedx = speedx
         self.speedy = speedy
         self.grazed = False
 
     def update(self, frame_count):
-        self.rect.x += self.speedx
-        self.rect.y += self.speedy
+        # Update float positions
+        self.x += self.speedx
+        self.y += self.speedy
+        
+        # Update rect CENTER (not x, y)
+        self.rect.centerx = int(self.x)  # ← Use centerx/centery
+        self.rect.centery = int(self.y)  # ← Not x/y
+        
         if not pygame.display.get_surface().get_rect().colliderect(self.rect):
             self.kill()
 
 class Enemy(pygame.sprite.Sprite):
-    def __init__(self, x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=None, waypoints=None, speed=1, fast_entry=False):
+    def __init__(self, x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=None, waypoints=None, speed=1, fast_entry=False, can_shoot=True, shoot_delay_ms=0):
         super().__init__()
         self.image = pygame.Surface([30, 30], pygame.SRCALPHA)
         self.rect = self.image.get_rect()
@@ -60,7 +79,7 @@ class Enemy(pygame.sprite.Sprite):
         self.decelerating = False
         self.speed_threshold_y = screen_height * 0.25 # Changed from 0.75 to 0.25
         self.velocity = pygame.math.Vector2(0, self.speed)
-        self.shoot_delay = 1000
+        self.shoot_delay = 60
         self.last_shot = 0
         self.health = 10
         self.debuffs = {}
@@ -70,10 +89,20 @@ class Enemy(pygame.sprite.Sprite):
         self.current_waypoint_index = 0
         self.all_sprites = all_sprites
         self.enemy_bullets = enemy_bullets
+        self.can_shoot = can_shoot
+        self.shoot_delay_ms = shoot_delay_ms
+        self.spawn_time = pygame.time.get_ticks()
+        self.has_entered_screen = False
 
     def update(self, frame_count):
         self.move(frame_count)
-        self.shoot(frame_count)
+
+        if not self.has_entered_screen and self.rect.top >= 0:
+            self.has_entered_screen = True
+            self.spawn_time = pygame.time.get_ticks() # Reset timer when enemy is visible
+
+        if self.can_shoot and self.has_entered_screen and pygame.time.get_ticks() - self.spawn_time >= self.shoot_delay_ms:
+            self.shoot(frame_count)
         if self.health <= 0:
             self.kill()
 
@@ -131,29 +160,72 @@ class Enemy(pygame.sprite.Sprite):
         if self.bullet_pattern:
             self.bullet_pattern(self, self.player, self.all_sprites, self.enemy_bullets, frame_count)
 
-class EnemyTypeA(Enemy):
-    def __init__(self, x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=None, waypoints=None, speed=1, fast_entry=False):
-        super().__init__(x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=bullet_pattern, waypoints=waypoints, speed=speed, fast_entry=fast_entry)
-        self.image = pygame.Surface([30, 30], pygame.SRCALPHA)
-        pygame.draw.polygon(self.image, RED, [(15, 0), (0, 30), (30, 30)])
-        self.shoot_delay = 1500
+class Tutorial_Square(Enemy):
+    def __init__(self, x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=None, waypoints=None, speed=1, fast_entry=False, can_shoot=True, shoot_delay_ms=0):
+        super().__init__(x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=bullet_pattern, waypoints=waypoints, speed=speed, fast_entry=fast_entry, can_shoot=can_shoot, shoot_delay_ms=shoot_delay_ms)
+        
+        # Load and scale the base image
+        self.base_image = pygame.image.load("media/Sprite/Enemy/Tutorial_Square.png").convert_alpha()
+        self.base_image = pygame.transform.scale(self.base_image, (30, 30))
+        
+        # Animation properties (time-based, not frame-based)
+        self.animation_time = 0
+        self.pulse_speed = 5.0  # Radians per second (about 0.8 cycles/sec)
+        self.rotation = 0
+        self.rotation_speed = 60  # Degrees per second
+        
+        self.image = self.base_image.copy()
+        self.shoot_delay = 90
+        
+        # Delta time tracking
+        self.clock = pygame.time.Clock()
+    
+    def update(self, *args, **kwargs):
+        super().update(*args, **kwargs)
+        
+        # Get delta time in seconds (1/60 = 0.0167 seconds at 60 FPS)
+        dt = self.clock.tick(60) / 1000.0
+        
+        self.animate(dt)
+    
+    def animate(self, dt):
+        # Update animation time based on actual time passed
+        self.animation_time += self.pulse_speed * dt
+        
+        # Pulsing scale effect (90% to 110% size)
+        scale_factor = 1.0 + 0.1 * math.sin(self.animation_time)
+        
+        # Rotation effect
+        self.rotation = (self.rotation + self.rotation_speed * dt) % 360
+        
+        # Apply scale
+        scaled_size = int(30 * scale_factor)
+        scaled_image = pygame.transform.scale(self.base_image, (scaled_size, scaled_size))
+        
+        # Apply rotation
+        rotated_image = pygame.transform.rotate(scaled_image, self.rotation)
+        
+        # Keep the center position
+        old_center = self.rect.center
+        self.image = rotated_image
+        self.rect = self.image.get_rect(center=old_center)
 
 class EnemyTypeB(Enemy):
-    def __init__(self, x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=None, waypoints=None, speed=1, fast_entry=False):
-        super().__init__(x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=bullet_pattern, waypoints=waypoints, speed=speed, fast_entry=fast_entry)
+    def __init__(self, x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=None, waypoints=None, speed=1, fast_entry=False, can_shoot=True, shoot_delay_ms=0):
+        super().__init__(x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=bullet_pattern, waypoints=waypoints, speed=speed, fast_entry=fast_entry, can_shoot=can_shoot, shoot_delay_ms=shoot_delay_ms)
         self.image = pygame.Surface([30, 30], pygame.SRCALPHA)
         pygame.draw.circle(self.image, BLUE, (15, 15), 15)
-        self.shoot_delay = 2000
+        self.shoot_delay = 120
         self.burst_count = 0
         self.last_burst_shot = 0
 
 class EnemyTypeC(Enemy):
-    def __init__(self, x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=None, waypoints=None, speed=1, fast_entry=False):
-        super().__init__(x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=bullet_pattern, waypoints=waypoints, speed=speed, fast_entry=fast_entry)
+    def __init__(self, x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=None, waypoints=None, speed=1, fast_entry=False, can_shoot=True, shoot_delay_ms=0):
+        super().__init__(x, y, player, all_sprites, enemy_bullets, screen_height, bullet_pattern=bullet_pattern, waypoints=waypoints, speed=speed, fast_entry=fast_entry, can_shoot=can_shoot, shoot_delay_ms=shoot_delay_ms)
         self.image = pygame.Surface([30, 30], pygame.SRCALPHA)
         points = self.create_star_points(15, 15, 15, 7, 5)
         pygame.draw.polygon(self.image, (255, 255, 0), points)
-        self.shoot_delay = 1000
+        self.shoot_delay = 60
         self.angle = 0
 
     def create_star_points(self, center_x, center_y, outer_radius, inner_radius, num_points=5):
@@ -193,7 +265,7 @@ class Boss(pygame.sprite.Sprite):
         self.schematic_2_state_timer = 0
         self.schematic_2_rotation_angle = 0
         self.SPIN_LEFT_DURATION = 120  # 2 seconds at 60 FPS
-        self.PAUSE_DURATION = 30       # 0.5 seconds at 60 FPS
+        self.PAUSE_DURATION = 60       # 1 second at 60 FPS
         self.SPIN_RIGHT_DURATION = 120 # 2 seconds at 60 FPS
 
     def update(self, frame_count):
@@ -275,19 +347,20 @@ class Boss(pygame.sprite.Sprite):
 
     def spinning_pattern(self, direction):
         """Creates a spinning wall of bullets"""
-        if self.schematic_2_timer % 3 == 0:  # Fire every 3 frames
-            # Slower rotation for dodgeable gaps
-            self.schematic_2_rotation_angle += direction * 0.03
+        if self.schematic_2_timer % 3 == 0:  # Shoot every 3 frames
+            # Update rotation - use the SAME speed as working version
+            self.schematic_2_rotation_angle += direction * 0.015  # ← Changed from 0.03 to 0.015
             
             num_bullets = 20
             for i in range(num_bullets):
                 angle = self.schematic_2_rotation_angle + (i * 2 * math.pi / num_bullets)
-                speed = 1.2  # Slow speed for wall effect
+                speed = 1.2
                 vx = math.cos(angle) * speed
                 vy = math.sin(angle) * speed
                 
+                color = CYAN if direction == -1 else PURPLE
                 bullet = Bullet(self.rect.centerx, self.rect.centery, 
-                              vx, vy, "boss_bullet")
+                            vx, vy, "boss_schematic_bullet", color)
                 self.all_sprites.add(bullet)
                 self.enemy_bullets.add(bullet)
 
@@ -299,8 +372,8 @@ class BossTypeA(Boss):
         super().__init__(player, all_sprites, enemy_bullets)
 
 class Miniboss(Enemy):
-    def __init__(self, x, y, player, all_sprites, enemy_bullets, screen_height, waypoints=None):
-        super().__init__(x, y, player, all_sprites, enemy_bullets, screen_height, waypoints=None, speed=2)
+    def __init__(self, x, y, player, all_sprites, enemy_bullets, screen_height, waypoints=None, can_shoot=True, shoot_delay_ms=0):
+        super().__init__(x, y, player, all_sprites, enemy_bullets, screen_height, waypoints=waypoints, speed=2, can_shoot=can_shoot, shoot_delay_ms=shoot_delay_ms)
         self.image = pygame.Surface((60, 60))
         self.image.fill(GREEN)
         self.rect = self.image.get_rect()
@@ -376,12 +449,13 @@ class Miniboss(Enemy):
                     self.pattern_wave_count = 0
 
 class HomingMissile(Bullet):
-    def __init__(self, x, y, speedx, speedy, enemies):
+    def __init__(self, x, y, speedx, speedy, enemies, bosses):
         super().__init__(x, y, speedx, speedy, "homing_missile")
         self.start_pos = pygame.math.Vector2(x, y)
         self.target = None
         self.last_direction = pygame.math.Vector2(0, 0)
         self.enemies = enemies
+        self.bosses = bosses if bosses is not None else pygame.sprite.Group()
 
     def update(self, frame_count):
         if self.target and self.target.alive():
@@ -389,24 +463,33 @@ class HomingMissile(Bullet):
             if direction.length() > 0:
                 direction.normalize_ip()
                 self.last_direction = direction
-            self.rect.x += direction.x * 5
-            self.rect.y += direction.y * 5
-        elif self.target and not self.target.alive():
-            self.rect.x += self.last_direction.x * 5
-            self.rect.y += self.last_direction.y * 5
+        
+        if self.target and self.last_direction.length() > 0:
+            self.x += self.last_direction.x * 7
+            self.y += self.last_direction.y * 7
         else:
-            self.rect.x += self.speedx
-            self.rect.y += self.speedy
+            self.x += self.speedx
+            self.y += self.speedy
+
+        self.rect.centerx = int(self.x)
+        self.rect.centery = int(self.y)
 
         if not self.target and self.start_pos.distance_to(self.rect.center) > 300:
-            closest_enemy = None
+            closest_target = None
             closest_distance = float('inf')
-            for enemy in self.enemies:
-                distance = pygame.math.Vector2(self.rect.center).distance_to(enemy.rect.center)
-                if distance < closest_distance:
-                    closest_distance = distance
-                    closest_enemy = enemy
-            self.target = closest_enemy
+            
+            target_groups = [self.enemies, self.bosses]
+
+            for group in target_groups:
+                for entity in group:
+                    distance = pygame.math.Vector2(self.rect.center).distance_to(entity.rect.center)
+                    if distance < closest_distance:
+                        closest_distance = distance
+                        closest_target = entity
+            self.target = closest_target
+
+        if not pygame.display.get_surface().get_rect().colliderect(self.rect):
+            self.kill()
 
 
 def pattern_simple_shot(enemy, player, all_sprites, enemy_bullets, frame_count):
