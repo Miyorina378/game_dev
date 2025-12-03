@@ -638,11 +638,23 @@ def title_screen():
 
         box_width = total_width + 100
         box_height = 80
+        # Center the box
         box_x = (SCREEN_WIDTH + UI_WIDTH) / 2 - box_width / 2
         box_y = SCREEN_HEIGHT - 80
+
+        # 1. Create the Surface
         menu_box = pygame.Surface((box_width, box_height))
-        menu_box.set_alpha(200)
-        menu_box.fill(BLACK)
+        menu_box.set_alpha(230) # Slightly less transparent for a solid metal look
+
+        # 2. Fill with a dark "Oxidized Copper" or "Dark Wood" color
+        # Dark Wood: (40, 26, 13) | Oxidized Green: (20, 40, 30)
+        menu_box.fill((40, 26, 13)) 
+
+        # 3. Draw a "Brass" Border
+        # Brass Color: (181, 166, 66)
+        pygame.draw.rect(menu_box, (181, 166, 66), menu_box.get_rect(), 3) # 3px border
+        pygame.draw.rect(menu_box, (138, 123, 33), menu_box.get_rect(), 1) # Inner shadow for depth
+
         render_surface.blit(menu_box, (box_x, box_y))
 
         start_x = (SCREEN_WIDTH + UI_WIDTH) / 2 - total_width / 2
@@ -918,6 +930,9 @@ def game_loop(new_game=True):
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_x: player.use_bomb()
                 if event.key == pygame.K_q: player.weapon_manager.switch_weapon()
+                if event.key == pygame.K_z: 
+                    # Pass the Z key event to the stage logic if active (e.g., dialogue)
+                    pass 
                 if event.key == pygame.K_ESCAPE:
                     pygame.mixer.Channel(0).stop()
                     action = pause_menu(screen, render_surface)
@@ -1043,6 +1058,12 @@ def game_loop(new_game=True):
 
         game_surface.fill(stage_manager.current_stage.background_color)
         all_sprites.draw(game_surface)
+        
+        # --- DRAW DIALOGUE HERE ---
+        # This was likely missing before
+        stage_manager.current_stage.draw(game_surface)
+        # --------------------------
+        
         if welcome_animation:
             welcome_animation.draw(game_surface)
         player.draw_hitbox(game_surface)
