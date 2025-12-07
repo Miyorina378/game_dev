@@ -3,10 +3,13 @@ import random
 import math
 import json
 import os
-from Enemy import Bullet, HomingMissile
+from Enemy import Bullet
 from stages.stage1 import Stage1
 from stages.stage2 import Stage2
-from config import SCREEN_WIDTH, SCREEN_HEIGHT, UI_WIDTH, settings
+from config import SCREEN_WIDTH, SCREEN_HEIGHT, UI_WIDTH, settings, font_name
+from Items import WeaponManager, WeaponUI, HomingMissile
+# IMPORT INTERLUDE
+from Interlude import InterludeScreen
 
 pygame.mixer.pre_init(44100, -16, 2, 2048)
 pygame.init()
@@ -29,8 +32,6 @@ render_surface = pygame.Surface((SCREEN_WIDTH + UI_WIDTH, SCREEN_HEIGHT))
 game_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Aetherium Machina")
 
-font_name = pygame.font.match_font('arial')
-
 sfx = {
     "death": pygame.mixer.Sound("media/sfx/death.wav"),
     "select": pygame.mixer.Sound("media/sfx/Select.wav"),
@@ -47,8 +48,6 @@ def set_sfx_volume(volume):
 set_sfx_volume(settings.sfx_volume)
 pygame.mixer.music.set_volume(settings.music_volume)
 
-# Screen dimensions
-
 SAVE_FILE = "savegame.json"
 
 def draw_text(surface, text, size, x, y, color=(255, 255, 255)):
@@ -58,199 +57,8 @@ def draw_text(surface, text, size, x, y, color=(255, 255, 255)):
     text_rect.midtop = (x, y)
     surface.blit(text_surface, text_rect)
 
-class Weapon:
-    def __init__(self, name, weapon_type):
-        self.name = name
-        self.weapon_type = weapon_type
-
-    def shoot(self, player):
-        pass
-
-class WeaponManager:
-    def __init__(self, player, enemies):
-        self.player = player
-        self.weapons = {
-            "active": [DefaultWeapon(), BeamCannon()],
-            "passive": [HomingMissiles(enemies)]
-        }
-        self.active_weapon_index = 0
-
-    def set_bosses(self, bosses):
-        for weapon in self.weapons["passive"]:
-            if isinstance(weapon, HomingMissiles):
-                weapon.set_bosses(bosses)
-
-    def shoot_active(self, frame_count):
-        self.weapons["active"][self.active_weapon_index].shoot(self.player, frame_count)
-
-    def shoot_passive(self, frame_count):
-        for weapon in self.weapons["passive"]:
-            weapon.shoot(self.player, frame_count)
-
-    def switch_weapon(self):
-        self.active_weapon_index = (self.active_weapon_index + 1) % len(self.weapons["active"])
-
-class WeaponUI:
-    def __init__(self, weapon_manager):
-        self.weapon_manager = weapon_manager
-        self.center_x = UI_WIDTH // 2
-        self.center_y = 300
-        self.weapon_icon_size = (40, 40)
-
-    def draw(self, surface):
-        active_weapons = self.weapon_manager.weapons["active"]
-        passive_weapons = self.weapon_manager.weapons["passive"]
-        all_weapons = active_weapons + passive_weapons
-        num_weapons = len(all_weapons)
-        if num_weapons == 0:
-            return
-
-        start_x = self.center_x - (num_weapons * 60) // 2
-        y = self.center_y
-
-        for i, weapon in enumerate(all_weapons):
-            x = start_x + i * 60
-
-            # Draw a circle for the weapon
-            is_selected = False
-            if weapon.weapon_type == "active" and weapon == active_weapons[self.weapon_manager.active_weapon_index]:
-                is_selected = True
-            else:
-                is_selected = False
-            
-            color = WHITE if is_selected and weapon.weapon_type == "active" else (100, 100, 100)
-
-            radius = 30 if is_selected else 25
-            pygame.draw.circle(surface, color, (int(x), int(y)), radius, 2)
-
-            # Draw weapon name
-            font_size = 20 if is_selected else 16
-            font = pygame.font.Font(font_name, font_size)
-            if weapon.weapon_type == "passive":
-                text_color = (150, 150, 150)
-                type_text_color = (150, 150, 150)
-            else:
-                text_color = WHITE
-                type_text_color = WHITE
-            text = font.render(weapon.name, True, text_color)
-            text_rect = text.get_rect(center=(x, y))
-            surface.blit(text, text_rect)
-
-            # Draw A or P
-            type_text_content = "A" if weapon.weapon_type == "active" else "P"
-            type_font = pygame.font.Font(font_name, 12)
-            type_text = type_font.render(type_text_content, True, type_text_color)
-            type_text_rect = type_text.get_rect(center=(x, y + 30))
-            surface.blit(type_text, type_text_rect)
-
-class DefaultWeapon(Weapon):
-    def __init__(self):
-        super().__init__("Default", "active")
-
-    def shoot(self, player, frame_count):
-        if frame_count - player.last_shot > player.shoot_delay:
-            player.last_shot = frame_count
-            if not pygame.mixer.Channel(0).get_busy():
-                pygame.mixer.Channel(0).play(player.shooting_sound)
-            if player.focused:
-                all_sprites.add(Bullet(player.rect.centerx, player.rect.top, 0, -10, "player"))
-                bullets.add(all_sprites.sprites()[-1])
-            else:
-                all_sprites.add(Bullet(player.rect.centerx, player.rect.top, 0, -7, "player"),
-                                Bullet(player.rect.left, player.rect.centery, -2, -7, "player"),
-                                Bullet(player.rect.right, player.rect.centery, 2, -7, "player"))
-                bullets.add(all_sprites.sprites()[-3:])
-
-class Beam(pygame.sprite.Sprite):
-    def __init__(self, x, y, frame_count):
-        super().__init__()
-        self.width = 40
-        self.height = SCREEN_HEIGHT
-        self.spawn_time = frame_count
-        self.lifetime = 12
-        self.x = x
-        self.y = y
-        
-        # Create the beam with transparency support
-        self.image = pygame.Surface([self.width, self.height], pygame.SRCALPHA)
-        self.rect = self.image.get_rect(midbottom=(x, y))
-        
-    def update(self, frame_count):
-        age = frame_count - self.spawn_time
-        
-        if age > self.lifetime:
-            self.kill()
-            return
-        
-        # Calculate fade progress (1.0 at start, 0.0 at end)
-        fade_progress = 1.0 - (age / self.lifetime)
-        
-        # Clear the surface
-        self.image.fill((0, 0, 0, 0))
-        
-        # Draw gradient beam with multiple layers for glow effect
-        for i in range(3):
-            # Outer glow (wider, more transparent)
-            if i == 0:
-                width = self.width
-                alpha = int(100 * fade_progress)
-                color = (255, 100, 100, alpha)
-            # Middle layer
-            elif i == 1:
-                width = self.width * 0.6
-                alpha = int(180 * fade_progress)
-                color = (255, 50, 50, alpha)
-            # Core (brightest, narrowest)
-            else:
-                width = self.width * 0.3
-                alpha = int(255 * fade_progress)
-                color = (255, 255, 200, alpha)  # Bright yellowish core
-            
-            # Draw the layer
-            layer_surface = pygame.Surface([width, self.height], pygame.SRCALPHA)
-            layer_surface.fill(color)
-            offset_x = (self.width - width) // 2
-            self.image.blit(layer_surface, (offset_x, 0))
-
-class BeamCannon(Weapon):
-    def __init__(self):
-        super().__init__("Beam Cannon", "active")
-        self.last_shot = 0
-        self.shoot_delay = 120
-        self.beam_sound = sfx["beam"]
-
-    def shoot(self, player, frame_count):
-        if frame_count - self.last_shot > self.shoot_delay:
-            self.last_shot = frame_count
-            if not pygame.mixer.Channel(1).get_busy():
-                pygame.mixer.Channel(1).play(self.beam_sound)
-            beam = Beam(player.rect.centerx, player.rect.top, frame_count)
-            all_sprites.add(beam)
-            beams.add(beam)
-
-
-
-class HomingMissiles(Weapon):
-    def __init__(self, enemies):
-        super().__init__("Homing Missiles", "passive")
-        self.last_shot = 0
-        self.shoot_delay = 6
-        self.enemies = enemies
-        self.bosses = None
-
-    def set_bosses(self, bosses):
-        self.bosses = bosses
-
-    def shoot(self, player, frame_count):
-        if frame_count - self.last_shot > self.shoot_delay:
-            self.last_shot = frame_count
-            missile1 = HomingMissile(player.rect.left - 20, player.rect.centery, -2, -7, self.enemies, self.bosses)
-            missile2 = HomingMissile(player.rect.right + 20, player.rect.centery, 2, -7, self.enemies, self.bosses)
-            all_sprites.add(missile1, missile2)
-            bullets.add(missile1, missile2)
-
 class Player(pygame.sprite.Sprite):
-    def __init__(self, enemies):
+    def __init__(self, enemies, sfx_dict):
         super().__init__()
         self.original_image = pygame.image.load("media/images/robin.webp").convert()
         self.original_image.set_colorkey(WHITE)
@@ -274,12 +82,16 @@ class Player(pygame.sprite.Sprite):
         self.invincible = False
         self.invincible_timer = 0
         self.stage = 1
-        self.shooting_sound = sfx["shooting"]
-        self.weapon_manager = WeaponManager(self, enemies)
+        self.weapon_manager = WeaponManager(self, enemies, sfx_dict)
         self.weapon_ui = WeaponUI(self.weapon_manager)
         self.angle = 0
+        self.groups = None
 
-    def update(self, frame_count):
+    def set_groups(self, groups):
+        self.groups = groups
+
+    def update(self, frame_count, dialogue_is_active=False):
+        # Animation logic runs unconditionally
         self.angle = (self.angle + 5) % 360
         new_image = pygame.transform.rotate(self.image_orig, self.angle)
         old_center = self.rect.center
@@ -287,6 +99,13 @@ class Player(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.center = old_center
 
+        # Pause all player actions during dialogue
+        if dialogue_is_active:
+            # Stop shooting sound if dialogue starts while shooting
+            pygame.mixer.Channel(0).stop()
+            return
+
+        # Input and movement logic only runs when dialogue is not active
         keys = pygame.key.get_pressed()
         self.speed = 2.5 if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT] else 7.5
         self.focused = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
@@ -297,8 +116,7 @@ class Player(pygame.sprite.Sprite):
             self.mask = pygame.mask.from_surface(hitbox_surface)
         else:
             self.mask = pygame.mask.from_surface(self.image)
-        self.focused = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
-
+        
         if keys[pygame.K_UP] and self.rect.top > 0:
             self.position.y -= self.speed
         if keys[pygame.K_DOWN] and self.rect.bottom < SCREEN_HEIGHT:
@@ -311,49 +129,49 @@ class Player(pygame.sprite.Sprite):
         self.rect.center = self.position
         
         if keys[pygame.K_z]:
-            self.shoot(frame_count)
+            if self.groups:
+                self.shoot(frame_count)
         else:
             pygame.mixer.Channel(0).stop()
 
         if self.invincible:
             if frame_count - self.invincible_timer > 180:
                 self.invincible = False
-                try:
-                    self.image.set_alpha(255)
-                except Exception:
-                    pass
+                try: self.image.set_alpha(255)
+                except: pass
             else:
                 step = ((frame_count - self.invincible_timer) // 9) % 2
                 self.image.set_alpha(255 if step == 0 else 0)
         else:
-            try:
-                self.image.set_alpha(255)
-            except Exception:
-                pass
+            try: self.image.set_alpha(255)
+            except: pass
 
     def shoot(self, frame_count):
-        self.weapon_manager.shoot_active(frame_count)
-        self.weapon_manager.shoot_passive(frame_count)
+        self.weapon_manager.shoot_active(frame_count, self.groups)
+        self.weapon_manager.shoot_passive(frame_count, self.groups)
 
     def use_bomb(self):
         if self.bombs > 0:
             self.bombs -= 1
-            for enemy in enemies:
-                enemy.kill()
-            for bullet in enemy_bullets:
-                bullet.kill()
+            if self.groups:
+                for enemy in self.groups['enemies']:
+                    enemy.kill()
+                for bullet in self.groups['enemy_bullets']:
+                    bullet.kill()
 
     def die(self, frame_count):
         self.lives -= 1
         pygame.mixer.Channel(1).play(sfx["death"])
         explosion = Explosion(self.rect.center, frame_count)
-        all_sprites.add(explosion)
-        power_to_drop = int(self.power * 0.25)
-        self.power -= power_to_drop
-        for _ in range(power_to_drop):
-            powerup = PowerUp(self.rect.center)
-            all_sprites.add(powerup)
-            powerups.add(powerup)
+        if self.groups:
+            self.groups['all_sprites'].add(explosion)
+            power_to_drop = int(self.power * 0.25)
+            self.power -= power_to_drop
+            for _ in range(power_to_drop):
+                powerup = PowerUp(self.rect.center)
+                self.groups['all_sprites'].add(powerup)
+                self.groups['powerups'].add(powerup)
+        
         self.rect.centerx = SCREEN_WIDTH / 2
         self.rect.bottom = SCREEN_HEIGHT - 10
         self.invincible = True
@@ -363,32 +181,40 @@ class Player(pygame.sprite.Sprite):
         if self.focused:
             pygame.draw.rect(surface, RED, (self.rect.centerx - 6, self.rect.centery - 6, 12, 12))
 
-
-
-
 class StageManager:
-    def __init__(self, player, all_sprites, enemies, enemy_bullets, bosses):
+    # UPDATED INIT: Added 'bullets' and 'beams' arguments
+    def __init__(self, player, all_sprites, enemies, enemy_bullets, bosses, bullets, beams):
         self.player = player
         self.all_sprites = all_sprites
         self.enemies = enemies
         self.enemy_bullets = enemy_bullets
         self.bosses = bosses
+        self.bullets = bullets
+        self.beams = beams
         self.stages = [Stage1, Stage2]
         self.current_stage_index = self.player.stage - 1
         self.current_stage = self.stages[self.current_stage_index](self.player, self.all_sprites, self.enemies, self.enemy_bullets, self.bosses)
 
     def update(self, frame_count):
         self.current_stage.update(frame_count)
-        if self.current_stage.stage_complete:
-            self.next_stage()
+        # Check completion logic in main loop
 
     def next_stage(self):
         self.current_stage_index += 1
         self.player.stage += 1
+        
+        # --- CRITICAL: CLEANUP OLD STAGE ENTITIES ---
+        for sprite in self.enemies: sprite.kill()
+        for sprite in self.enemy_bullets: sprite.kill()
+        for sprite in self.bosses: sprite.kill()
+        for sprite in self.bullets: sprite.kill() # Clear player bullets
+        for sprite in self.beams: sprite.kill()   # Clear player beams
+        # --------------------------------------------
+
         if self.current_stage_index < len(self.stages):
             self.current_stage = self.stages[self.current_stage_index](self.player, self.all_sprites, self.enemies, self.enemy_bullets, self.bosses)
         else:
-            print("Game complete!") # Placeholder
+            print("Game complete!")
 
 class PowerUp(pygame.sprite.Sprite):
     def __init__(self, center):
@@ -435,47 +261,37 @@ class WelcomeAnimation:
         
         self.start_time = frame_count
         self.finished = False
-        self.state = 'fade_in' # 'fade_in', 'pause', 'fade_out'
-
+        self.state = 'fade_in' 
         self.fade_in_duration = 60
         self.pause_duration = 180
         self.fade_out_duration = 30
-
         self.start_pos_x = SCREEN_WIDTH * 0.25
         self.mid_pos_x = SCREEN_WIDTH * 0.5
         self.end_pos_x = SCREEN_WIDTH * 0.75
 
     def update(self, frame_count):
-        if self.finished:
-            return
-
+        if self.finished: return
         elapsed = frame_count - self.start_time
-
         if self.state == 'fade_in':
             if elapsed > self.fade_in_duration:
                 self.state = 'pause'
-                self.start_time = frame_count # Reset timer for next state
+                self.start_time = frame_count
                 elapsed = 0
-            
             progress = elapsed / self.fade_in_duration
             self.text_rect.centerx = self.start_pos_x + (self.mid_pos_x - self.start_pos_x) * progress
             alpha = int(255 * progress)
             self.text_surface.set_alpha(alpha)
-
         elif self.state == 'pause':
             if elapsed > self.pause_duration:
                 self.state = 'fade_out'
-                self.start_time = frame_count # Reset timer for next state
+                self.start_time = frame_count
                 elapsed = 0
-            
             self.text_rect.centerx = self.mid_pos_x
             self.text_surface.set_alpha(255)
-
         elif self.state == 'fade_out':
             if elapsed > self.fade_out_duration:
                 self.finished = True
                 return
-                
             progress = elapsed / self.fade_out_duration
             self.text_rect.centerx = self.mid_pos_x + (self.end_pos_x - self.mid_pos_x) * progress
             alpha = int(255 * (1 - progress))
@@ -488,76 +304,50 @@ class WelcomeAnimation:
 def draw_ui(player):
     font_name = pygame.font.match_font('arial')
     global fullscreen_mode
-    if fullscreen_mode:
-        return
+    if fullscreen_mode: return
     
-    # Create UI surface with alpha channel for transparency
     ui_surface = pygame.Surface((UI_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-    
-    # Define aura width
     aura_width = 5
-    
-    # Fill only the area AFTER the aura with dark background
     background_rect = pygame.Rect(aura_width, 0, UI_WIDTH - aura_width, SCREEN_HEIGHT)
     pygame.draw.rect(ui_surface, (30, 30, 35), background_rect)
-    
-    # Draw gradient aura from light gray to dark gray
-    start_color = (245, 245, 245)  # Light gray (near white)
-    end_color = (45, 45, 55)        # Dark gray (UI box color)
+    start_color = (245, 245, 245)
+    end_color = (45, 45, 55)
     
     for i in range(aura_width):
-        # Create gradient from light to dark
-        progress = i / aura_width  # 0.0 at left edge, 1.0 at right edge
-        
-        # Interpolate between start and end colors
+        progress = i / aura_width
         r = int(start_color[0] + (end_color[0] - start_color[0]) * progress)
         g = int(start_color[1] + (end_color[1] - start_color[1]) * progress)
         b = int(start_color[2] + (end_color[2] - start_color[2]) * progress)
-        
         glow_surface = pygame.Surface((2, SCREEN_HEIGHT))
         glow_surface.fill((r, g, b))
         ui_surface.blit(glow_surface, (i, 0))
     
-    # Define shadow box function for minimalist style with OUTER shadow
     def draw_shadow_box(surface, x, y, width, height, shadow_offset=4):
-        # Outer shadow (drawn first, behind the box)
         shadow_rect = pygame.Rect(x + shadow_offset, y + shadow_offset, width, height)
         pygame.draw.rect(surface, (10, 10, 15), shadow_rect, border_radius=8)
-        
-        # Main box on top of shadow
         main_rect = pygame.Rect(x, y, width, height)
         pygame.draw.rect(surface, (45, 45, 55), main_rect, border_radius=8)
-        
-        # Subtle outer border for definition
         pygame.draw.rect(surface, (70, 70, 80), main_rect, 1, border_radius=8)
-        
         return main_rect
     
-    # Offset for UI elements to start after the glow
     ui_start_x = aura_width + 10
     ui_box_width = UI_WIDTH - ui_start_x - 15
-    
-    # Stats container
     stats_box = draw_shadow_box(ui_surface, ui_start_x, 15, ui_box_width, 180)
     
-    # Draw stats with better spacing
     y_offset = 30
     spacing = 28
     text_center_x = ui_start_x + ui_box_width / 2
     
     draw_text(ui_surface, f"SCORE", 14, text_center_x, y_offset, color=(150, 150, 160))
     draw_text(ui_surface, f"{player.score}", 20, text_center_x, y_offset + 15, color=(255, 255, 255))
-    
     draw_text(ui_surface, f"LIVES: {player.lives}", 16, text_center_x, y_offset + spacing * 2, color=(200, 200, 210))
     draw_text(ui_surface, f"BOMBS: {player.bombs}", 16, text_center_x, y_offset + spacing * 3, color=(200, 200, 210))
     draw_text(ui_surface, f"POWER: {player.power}", 16, text_center_x, y_offset + spacing * 4, color=(200, 200, 210))
     draw_text(ui_surface, f"GRAZE: {player.graze}", 16, text_center_x, y_offset + spacing * 5, color=(200, 200, 210))
     
-    # Stage indicator box
     stage_box = draw_shadow_box(ui_surface, ui_start_x, 210, ui_box_width, 50)
     draw_text(ui_surface, f"STAGE {player.stage}", 18, text_center_x, 235, color=(255, 255, 255))
     
-    # Weapon UI box
     weapon_box_y = 280
     draw_shadow_box(ui_surface, ui_start_x, weapon_box_y, ui_box_width, 120)
     player.weapon_ui.draw(ui_surface)
@@ -608,11 +398,17 @@ def fade_to_black(duration):
         pygame.display.flip()
         pygame.time.delay(duration // (256 // 5))
 
-
 def title_screen():
     pygame.mixer.music.load("media/OST/Title.wav")
     pygame.mixer.music.set_volume(0.25)
     pygame.mixer.music.play(-1)
+    
+    # Stylized Menu Box Logic
+    menu_bar_img = None
+    try:
+        menu_bar_img = pygame.image.load("media/images/menu_bar.png").convert_alpha()
+    except: pass
+
     title_image = pygame.image.load("media/images/titleImage.jpg").convert_alpha()
     title_image = pygame.transform.scale(title_image, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT))
     game_logo = pygame.image.load("media/images/gameLogo.png").convert_alpha()
@@ -620,7 +416,7 @@ def title_screen():
     menu_options = ["NEW GAME", "LOAD", "SETTINGS", "EXIT"]
     selected_option = 0
     cursor_image = pygame.image.load("media/images/cursor.png").convert_alpha()
-    font_name = pygame.font.match_font('timesnewroman') # Using a serif font
+    font_name = pygame.font.match_font('timesnewroman')
     option_font = pygame.font.Font(font_name, 25)
     font_height = option_font.get_height()
     cursor_image = pygame.transform.scale(cursor_image, (int(font_height * 1.5), int(font_height * 1.5)))
@@ -630,48 +426,39 @@ def title_screen():
         render_surface.blit(game_logo, game_logo_rect)
 
         total_width = 0
-        option_font = pygame.font.Font(font_name, 25)
-
         for option in menu_options:
             total_width += option_font.size(option)[0]
         total_width += 50 * (len(menu_options) - 1)
 
         box_width = total_width + 100
         box_height = 80
-        # Center the box
         box_x = (SCREEN_WIDTH + UI_WIDTH) / 2 - box_width / 2
         box_y = SCREEN_HEIGHT - 80
-
-        # 1. Create the Surface
-        menu_box = pygame.Surface((box_width, box_height))
-        menu_box.set_alpha(230) # Slightly less transparent for a solid metal look
-
-        # 2. Fill with a dark "Oxidized Copper" or "Dark Wood" color
-        # Dark Wood: (40, 26, 13) | Oxidized Green: (20, 40, 30)
-        menu_box.fill((40, 26, 13)) 
-
-        # 3. Draw a "Brass" Border
-        # Brass Color: (181, 166, 66)
-        pygame.draw.rect(menu_box, (181, 166, 66), menu_box.get_rect(), 3) # 3px border
-        pygame.draw.rect(menu_box, (138, 123, 33), menu_box.get_rect(), 1) # Inner shadow for depth
-
-        render_surface.blit(menu_box, (box_x, box_y))
+        
+        # Draw Menu Box
+        if menu_bar_img:
+             scaled_menu_bar = pygame.transform.scale(menu_bar_img, (int(box_width), int(box_height)))
+             render_surface.blit(scaled_menu_bar, (box_x, box_y))
+        else:
+            menu_box = pygame.Surface((box_width, box_height))
+            menu_box.set_alpha(230)
+            menu_box.fill((40, 26, 13)) 
+            pygame.draw.rect(menu_box, (181, 166, 66), menu_box.get_rect(), 3)
+            pygame.draw.rect(menu_box, (138, 123, 33), menu_box.get_rect(), 1)
+            render_surface.blit(menu_box, (box_x, box_y))
 
         start_x = (SCREEN_WIDTH + UI_WIDTH) / 2 - total_width / 2
         menu_y = SCREEN_HEIGHT - 40
-        
         current_x = start_x
         for i, option in enumerate(menu_options):
             color = WHITE if i == selected_option else (150, 150, 150)
             text_surface = option_font.render(option, True, color)
             text_rect = text_surface.get_rect(centery=menu_y)
             text_rect.x = current_x
-
             if i == selected_option:
                 cursor_rect = cursor_image.get_rect(centery=menu_y)
                 cursor_rect.right = text_rect.left - 5
                 render_surface.blit(cursor_image, cursor_rect)
-
             render_surface.blit(text_surface, text_rect)
             current_x += text_rect.width + 50
 
@@ -692,31 +479,23 @@ def title_screen():
                     pygame.mixer.music.stop()
                     return menu_options[selected_option]
 
-
-
-
 fullscreen_mode = False
 
 def options_screen():
     global screen, NATIVE_WIDTH, NATIVE_HEIGHT, render_surface, fullscreen_mode
-    
     options = ["Display Mode", "Music Volume", "SFX Volume", "Back"]
     selected_option_index = 0
-    
     display_modes = ["Windowed", "Fullscreen", "Borderless"]
     selected_mode_index = 0
-
     options_image = pygame.image.load("media/images/template menu.png").convert()
     options_image = pygame.transform.scale(options_image, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT))
 
     while True:
         render_surface.blit(options_image, (0, 0))
         draw_text(render_surface, "Options", 64, (SCREEN_WIDTH + UI_WIDTH) / 2, SCREEN_HEIGHT / 4)
-
         for i, option in enumerate(options):
             size = 30 if i == selected_option_index else 25
             color = WHITE if i == selected_option_index else (150, 150, 150)
-            
             if option == "Display Mode":
                 display_text = f"Display Mode: {display_modes[selected_mode_index]}"
                 font = pygame.font.Font(font_name, size)
@@ -724,43 +503,32 @@ def options_screen():
                 text_rect = text_surface.get_rect(midtop=((SCREEN_WIDTH + UI_WIDTH) / 2, SCREEN_HEIGHT / 2 + i * 60))
                 render_surface.blit(text_surface, text_rect)
             elif option == "Music Volume":
-                # Draw slider
                 slider_x = (SCREEN_WIDTH + UI_WIDTH) / 2 - 100
                 slider_y = SCREEN_HEIGHT / 2 + i * 60
                 slider_width = 200
                 slider_height = 20
-                
-                # Draw text
                 font = pygame.font.Font(font_name, size)
                 text_surface = font.render(f"Music Volume: {int(settings.music_volume * 100)}%", True, color)
                 text_rect = text_surface.get_rect(midtop=((SCREEN_WIDTH + UI_WIDTH) / 2, slider_y - 30))
                 render_surface.blit(text_surface, text_rect)
-
-                # Draw slider bar
                 pygame.draw.rect(render_surface, (100, 100, 100), (slider_x, slider_y, slider_width, slider_height))
                 pygame.draw.rect(render_surface, WHITE, (slider_x, slider_y, slider_width * settings.music_volume, slider_height))
             elif option == "SFX Volume":
-                # Draw slider
                 slider_x = (SCREEN_WIDTH + UI_WIDTH) / 2 - 100
                 slider_y = SCREEN_HEIGHT / 2 + i * 60
                 slider_width = 200
                 slider_height = 20
-
-                # Draw text
                 font = pygame.font.Font(font_name, size)
                 text_surface = font.render(f"SFX Volume: {int(settings.sfx_volume * 100)}%", True, color)
                 text_rect = text_surface.get_rect(midtop=((SCREEN_WIDTH + UI_WIDTH) / 2, slider_y - 30))
                 render_surface.blit(text_surface, text_rect)
-
-                # Draw slider bar
                 pygame.draw.rect(render_surface, (100, 100, 100), (slider_x, slider_y, slider_width, slider_height))
                 pygame.draw.rect(render_surface, WHITE, (slider_x, slider_y, slider_width * settings.sfx_volume, slider_height))
-            else: # Back button
+            else:
                 font = pygame.font.Font(font_name, size)
                 text_surface = font.render(option, True, color)
                 text_rect = text_surface.get_rect(midtop=((SCREEN_WIDTH + UI_WIDTH) / 2, SCREEN_HEIGHT / 2 + i * 60))
                 render_surface.blit(text_surface, text_rect)
-
 
         if fullscreen_mode:
             screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH, NATIVE_HEIGHT)), (0, 0))
@@ -789,7 +557,6 @@ def options_screen():
                         settings.sfx_volume = max(0.0, settings.sfx_volume - 0.05)
                         set_sfx_volume(settings.sfx_volume)
                         sfx["select"].play()
-
                 elif event.key == pygame.K_RIGHT:
                     if options[selected_option_index] == "Display Mode":
                         selected_mode_index = (selected_mode_index + 1) % len(display_modes)
@@ -800,7 +567,6 @@ def options_screen():
                         settings.sfx_volume = min(1.0, settings.sfx_volume + 0.05)
                         set_sfx_volume(settings.sfx_volume)
                         sfx["select"].play()
-
                 elif event.key == pygame.K_RETURN:
                     if options[selected_option_index] == "Display Mode":
                         selected_mode = display_modes[selected_mode_index]
@@ -831,6 +597,7 @@ def options_screen():
                     settings.save()
                     return
 
+# GLOBAL GROUPS placeholders
 all_sprites = pygame.sprite.Group()
 player_sprite = pygame.sprite.GroupSingle()
 bullets = pygame.sprite.Group()
@@ -838,6 +605,7 @@ enemies = pygame.sprite.Group()
 enemy_bullets = pygame.sprite.Group()
 powerups = pygame.sprite.Group()
 beams = pygame.sprite.Group()
+bosses = pygame.sprite.Group()
 
 def pause_menu(screen, render_surface):
     menu_options = ["Continue", "Quit to Main Menu"]
@@ -845,29 +613,23 @@ def pause_menu(screen, render_surface):
     font_name = pygame.font.match_font('arial')
     option_font = pygame.font.Font(font_name, 30)
     paused_font = pygame.font.Font(font_name, 64)
-
     overlay = pygame.Surface((NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT), pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 180))
 
     while True:
         render_surface.blit(overlay, (0, 0))
-
         paused_text = paused_font.render("Paused", True, WHITE)
         paused_rect = paused_text.get_rect(center=((SCREEN_WIDTH + UI_WIDTH) / 2, SCREEN_HEIGHT / 4))
         render_surface.blit(paused_text, paused_rect)
-
         for i, option in enumerate(menu_options):
             color = WHITE if i == selected_option else (150, 150, 150)
             text_surface = option_font.render(option, True, color)
             text_rect = text_surface.get_rect(center=((SCREEN_WIDTH + UI_WIDTH) / 2, SCREEN_HEIGHT / 2 + i * 50))
             render_surface.blit(text_surface, text_rect)
-
         screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
         pygame.display.flip()
-
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return "QUIT"
+            if event.type == pygame.QUIT: return "QUIT"
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_UP:
                     selected_option = (selected_option - 1) % len(menu_options)
@@ -876,20 +638,17 @@ def pause_menu(screen, render_surface):
                     selected_option = (selected_option + 1) % len(menu_options)
                     sfx["select"].play()
                 elif event.key == pygame.K_RETURN:
-                    if selected_option == 0:
-                        return "CONTINUE"
-                    elif selected_option == 1:
-                        return "QUIT"
-                elif event.key == pygame.K_ESCAPE:
-                    return "CONTINUE"
+                    if selected_option == 0: return "CONTINUE"
+                    elif selected_option == 1: return "QUIT"
+                elif event.key == pygame.K_ESCAPE: return "CONTINUE"
 
 def game_loop(new_game=True):
-    global game_over, running, all_sprites, player_sprite, bullets, enemies, enemy_bullets, powerups, bosses
-
-    frame_count = 0
+    global game_over, running, all_sprites, player_sprite, bullets, enemies, enemy_bullets, powerups, bosses, beams
 
     enemies = pygame.sprite.Group()
-    player = Player(enemies)
+    # Pass SFX dict to player for weapon manager
+    player = Player(enemies, sfx)
+    
     if not new_game:
         saved_data = load_game()
         if saved_data:
@@ -898,21 +657,37 @@ def game_loop(new_game=True):
     all_sprites = pygame.sprite.Group(player)
     player_sprite = pygame.sprite.GroupSingle(player)
     bullets, enemy_bullets, powerups, bosses = (pygame.sprite.Group() for _ in range(4))
+    beams = pygame.sprite.Group()
+    
+    # Bundle groups for weapons
+    projectile_groups = {
+        'all_sprites': all_sprites,
+        'bullets': bullets,
+        'beams': beams,
+        'enemies': enemies,
+        'enemy_bullets': enemy_bullets,
+        'powerups': powerups
+    }
+    player.set_groups(projectile_groups)
+    
     player.weapon_manager.set_bosses(bosses)
-    beams.empty()
 
-    stage_manager = StageManager(player, all_sprites, enemies, enemy_bullets, bosses)
+    # UPDATED: Pass bullets and beams to StageManager
+    stage_manager = StageManager(player, all_sprites, enemies, enemy_bullets, bosses, bullets, beams)
     
     welcome_animation = None
     if new_game and player.stage == 1:
-        welcome_animation = WelcomeAnimation(frame_count)
+        welcome_animation = WelcomeAnimation(0)
+
+    # --- INTERLUDE SETUP ---
+    interlude_screen = None
+    in_interlude = False
+    # -----------------------
 
     stage_music_playing = False
-
     game_over = False
     running = True
     clock = pygame.time.Clock()
-
     frame_count = 0
 
     while running:
@@ -923,6 +698,29 @@ def game_loop(new_game=True):
 
         clock.tick(60)
         frame_count += 1
+        
+        # --- HANDLE INTERLUDE UPDATES ---
+        if in_interlude and interlude_screen:
+            # Consume all events for the interlude specifically
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+            
+            result = interlude_screen.update()
+            
+            render_surface.fill(BLACK)
+            interlude_screen.draw(render_surface)
+            screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
+            pygame.display.flip()
+            
+            if result == "NEXT_STAGE":
+                in_interlude = False
+                stage_manager.next_stage()
+                # Re-setup next stage if needed or handled by next_stage()
+                
+            continue # SKIP the rest of the game loop while in interlude
+        # -------------------------------
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT: 
                 pygame.mixer.Channel(0).stop()
@@ -930,9 +728,7 @@ def game_loop(new_game=True):
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_x: player.use_bomb()
                 if event.key == pygame.K_q: player.weapon_manager.switch_weapon()
-                if event.key == pygame.K_z: 
-                    # Pass the Z key event to the stage logic if active (e.g., dialogue)
-                    pass 
+                if event.key == pygame.K_z: pass 
                 if event.key == pygame.K_ESCAPE:
                     pygame.mixer.Channel(0).stop()
                     action = pause_menu(screen, render_surface)
@@ -940,8 +736,10 @@ def game_loop(new_game=True):
                         save_game(player)
                         return
 
+        dialogue_is_active = stage_manager.current_stage and hasattr(stage_manager.current_stage, 'active_dialogue') and stage_manager.current_stage.active_dialogue is not None
 
-        all_sprites.update(frame_count)
+        if not dialogue_is_active:
+            all_sprites.update(frame_count)
 
         if welcome_animation:
             welcome_animation.update(frame_count)
@@ -951,10 +749,18 @@ def game_loop(new_game=True):
                     pygame.mixer.music.set_volume(1)
                     pygame.mixer.music.play(-1)
                     stage_music_playing = True
-
                 welcome_animation = None
         else:
             stage_manager.update(frame_count)
+            # CHECK STAGE COMPLETE
+            if stage_manager.current_stage.stage_complete:
+                # Trigger Interlude instead of instant next stage
+                in_interlude = True
+                # PASS SFX HERE
+                interlude_screen = InterludeScreen(player, player.stage, sfx)
+                # Reset stage complete flag to prevent re-triggering? 
+                # Ideally StageManager handles this, but for now we intercept it here.
+                stage_manager.current_stage.stage_complete = False 
 
         beam_hits = pygame.sprite.groupcollide(enemies, beams, False, False)
         for enemy, hit_beams in beam_hits.items():
@@ -994,21 +800,16 @@ def game_loop(new_game=True):
             for boss, hit_beams in boss_beam_hits.items():
                 for beam in hit_beams:
                     boss.debuffs["damage_vulnerability"] = {"start_time": frame_count, "duration": 600}
-                    damage = 1 # beam damage
+                    damage = 1 
                     if boss.health / boss.max_health < 0.25:
                         damage *= 0.1
                     boss.health -= damage
                 if boss.health <= 0:
                     boss.kill()
                     player.score += 10000
-                    # Stage Complete Logic
-                    draw_text(render_surface, "Stage Complete!!", 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
-                    screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
-                    pygame.display.flip()
-                    pygame.time.delay(2000) # Display message for 2 seconds
-                    fade_to_black(500) # Fade out
-                    stage_manager.next_stage()
-                    return # Exit current game_loop to start new stage
+                    
+                    # Don't return, let the loop continue into Interlude state
+                    # return 
 
             hits = pygame.sprite.groupcollide(bosses, bullets, False, True)
             for boss, hit_bullets in hits.items():
@@ -1017,25 +818,15 @@ def game_loop(new_game=True):
                         damage = 2.5
                     else:
                         damage = 10
-
                     if "damage_vulnerability" in boss.debuffs:
                         damage *= 1.5
-                    
                     if boss.health / boss.max_health < 0.25:
                         damage *= 0.1
-
                     boss.health -= damage
                 if boss.health <= 0:
                     boss.kill()
                     player.score += 10000
-                    # Stage Complete Logic
-                    draw_text(render_surface, "Stage Complete!!", 64, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2)
-                    screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
-                    pygame.display.flip()
-                    pygame.time.delay(2000) # Display message for 2 seconds
-                    fade_to_black(500) # Fade out
-                    stage_manager.next_stage()
-                    return # Exit current game_loop to start new stage
+                    # Don't return
 
         if pygame.sprite.spritecollide(player, enemy_bullets, True, pygame.sprite.collide_mask) and not player.invincible:
             player.die(frame_count)
@@ -1058,11 +849,7 @@ def game_loop(new_game=True):
 
         game_surface.fill(stage_manager.current_stage.background_color)
         all_sprites.draw(game_surface)
-        
-        # --- DRAW DIALOGUE HERE ---
-        # This was likely missing before
         stage_manager.current_stage.draw(game_surface)
-        # --------------------------
         
         if welcome_animation:
             welcome_animation.draw(game_surface)
@@ -1086,8 +873,6 @@ def splash_screen():
     splash_image = pygame.transform.scale(splash_image, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT))
     title_image = pygame.image.load("media/images/titleImage.jpg").convert_alpha()
     title_image = pygame.transform.scale(title_image, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT))
-
-    # Fade in splash
     for alpha in range(0, 256, 5):
         splash_image.set_alpha(alpha)
         render_surface.fill(BLACK)
@@ -1095,10 +880,7 @@ def splash_screen():
         screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
         pygame.display.flip()
         pygame.time.delay(30)
-
     pygame.time.delay(2000)
-
-    # Fade out splash and fade in title
     for alpha in range(0, 256, 5):
         splash_image.set_alpha(255 - alpha)
         title_image.set_alpha(alpha)
@@ -1113,8 +895,6 @@ def chapter_screen():
     chapter_image = pygame.image.load("media/images/Chapter1.jpg").convert()
     chapter_image = pygame.transform.scale(chapter_image, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT))
     next_button_rect = pygame.Rect((SCREEN_WIDTH + UI_WIDTH) / 2 - 50, SCREEN_HEIGHT - 100, 100, 50)
-    
-    # Fade in
     for alpha in range(0, 256, 5):
         chapter_image.set_alpha(alpha)
         render_surface.blit(chapter_image, (0, 0))
@@ -1123,7 +903,6 @@ def chapter_screen():
         screen.blit(pygame.transform.scale(render_surface, (NATIVE_WIDTH + UI_WIDTH, NATIVE_HEIGHT)), (0, 0))
         pygame.display.flip()
         pygame.time.delay(10)
-
     waiting = True
     while waiting:
         for event in pygame.event.get():
@@ -1133,8 +912,6 @@ def chapter_screen():
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if next_button_rect.collidepoint(event.pos):
                     waiting = False
-    
-    # Fade out
     fade_to_black(1000)
     return "START"
 

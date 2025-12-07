@@ -1,7 +1,7 @@
 import pygame
 import random
 import os
-from Enemy import Tutorial_Square, EnemyTypeB, EnemyTypeC, BossTypeA, Miniboss, pattern_simple_shot, pattern_burst_shot, pattern_spiral_shot, pattern_triple_shot, pattern_aimed_shot, pattern_emerald_shot
+from Enemy import Tutorial_Square, EnemyTypeB, EnemyTypeC, BossTypeA, Miniboss, pattern_simple_shot, pattern_burst_shot, pattern_spiral_shot, pattern_triple_shot, pattern_aimed_shot, pattern_emerald_shot, Bullet
 from config import SCREEN_WIDTH, SCREEN_HEIGHT
 
 # Colors
@@ -9,6 +9,10 @@ WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 DIALOGUE_BOX_COLOR = (40, 26, 13) # Dark Wood/Steampunk background
 DIALOGUE_BORDER_COLOR = (181, 166, 66) # Brass
+
+# --- 3D BACKGROUND COLORS ---
+DEEP_BLUE_BG = (5, 5, 25)     # สีน้ำเงินเข้มเกือบดำ (Void)
+WIRE_BLUE = (0, 200, 255)     # สีฟ้าสะท้อนแสง (Cyber/Neon)
 
 def lerp(start, end, factor):
     return start + (end - start) * factor
@@ -91,7 +95,6 @@ class DialogueCharacter:
         self.dimmed_image.set_alpha(128)
         self.w, self.h = width, height
         self.target_y = SCREEN_HEIGHT - height
-        # Set defaults for logic to not crash
         self.idle_x = 50 if self.position_side == 'left' else SCREEN_WIDTH - width - 50
         self.active_x = self.idle_x
         self.off_screen_x = -width if self.position_side == 'left' else SCREEN_WIDTH
@@ -112,7 +115,6 @@ class DialogueCharacter:
 
     def update(self):
         # Smoothly interpolate current X to target X
-        # 0.15 is the speed factor (0.0 to 1.0). Higher = faster snap.
         self.x = lerp(self.x, self.current_target_x, 0.15)
 
     def draw(self, surface, is_speaker):
@@ -157,7 +159,10 @@ class DialogueManager:
 
     def start(self):
         self.active = True
+        self.finished = False  # <--- CRITICAL FIX: Reset finished state
+        self.index = 0         # <--- CRITICAL FIX: Reset dialogue index
         self.state = 'opening'
+        
         # Reset characters to off-screen
         for p in self.participants:
             p.set_state('hidden')
@@ -226,20 +231,17 @@ class DialogueManager:
         current_speaker, _ = self.dialogues[self.index]
 
         # 1. Draw Characters
-        # Draw non-speakers first (background)
         for char in self.participants:
             if char != current_speaker:
                 char.draw(surface, is_speaker=False)
-        # Draw speaker last (foreground)
         current_speaker.draw(surface, is_speaker=True)
 
-        # 2. Draw Dialogue Box (Use dynamic self.box_y)
+        # 2. Draw Dialogue Box
         box_rect = pygame.Rect(20, self.box_y, SCREEN_WIDTH - 40, self.box_height)
         
         pygame.draw.rect(surface, DIALOGUE_BOX_COLOR, box_rect)
         pygame.draw.rect(surface, DIALOGUE_BORDER_COLOR, box_rect, 3)
 
-        # Only draw Text and Name if the box is visible (Playing or finishing opening)
         if self.state == 'playing' or (self.state == 'opening' and abs(self.box_y - self.box_target_y) < 50):
             text = self.dialogues[self.index][1]
 
@@ -292,25 +294,45 @@ class Stage:
 class Stage1(Stage):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.background_color = (245, 245, 245)
+        self.background_color = DEEP_BLUE_BG 
         self.miniboss_alive = False
         self.miniboss_fight_start_time = 0
         
+        # --- 3D Background Settings ---
+        self.horizon_y = SCREEN_HEIGHT * 0.35 
+        self.center_x = SCREEN_WIDTH / 2
+        
+        # Grid settings (Slower speed = 2.0)
+        self.grid_speed_z = 2.0     
+        self.grid_offset_z = 0.0    
+        self.grid_gap_z = 80        
+        self.grid_gap_x = 120       
+
         # --- Dialogue Setup ---
         self.marisa = DialogueCharacter("Marisa", "MarisaTemp.webp", "left", height=450, max_width=350, show_full_body=False)
         self.elysa = DialogueCharacter("Elysa", "Elastron.png", "right", height=500, max_width=380, show_full_body=True)
         
-        dialogue_script = [
+        # Dialogue Scripts
+        self.start_script = [
             (self.marisa, "So, this is the training zone? It looks simpler than I expected."),
             (self.elysa, "Do not underestimate the basics, Marisa. Precision is key."),
             (self.marisa, "Yeah, yeah. Just point me to the targets!"),
             (self.elysa, "Very well. Prepare yourself. The automatons are activating."),
         ]
+        self.end_script = [
+            (self.marisa, "You see? This is like a cakewalk."),
+            (self.elysa, "Don't get cocky. That was merely a perimeter guard."),
+            (self.marisa, "A guard? It had enough firepower to level a city block!"),
+            (self.elysa, "And yet, the core readings suggest far worse awaits us inside."),
+            (self.marisa, "Fine, fine. Let's head back and restock first."),
+        ]
         
-        self.dialogue_manager = DialogueManager(dialogue_script)
-        self.dialogue_finished = False
+        self.active_dialogue = None
+        self.opening_dialogue_triggered = False
+        self.boss_dead_dialogue_triggered = False
         self.dialogue_start_frame = 300 
-        
+        self.gameplay_frame_count = 0 # This timer pauses during dialogue
+
         # --- Wave Setup ---
         self.waves = [
             {"time": 60, "enemies": [{"type": "Tutorial_Square", "x": 100, "y": -50, "waypoints": [(100, 100)], "bullet_pattern": pattern_aimed_shot, "can_shoot": False}, {"type": "Tutorial_Square", "x": 300, "y": -50, "waypoints": [(300, 100)], "bullet_pattern": pattern_aimed_shot, "shoot_delay_ms": 1000}, {"type": "Tutorial_Square", "x": 500, "y": -50, "waypoints": [(500, 100)], "bullet_pattern": pattern_aimed_shot, "shoot_delay_ms": 2000}]},
@@ -344,39 +366,93 @@ class Stage1(Stage):
             ]}
         ]
         self.wave_index = 0
-        self.stage_timer = 0
+        
+    def start_dialogue(self, script):
+        self.active_dialogue = DialogueManager(script)
+        self.active_dialogue.start()
 
     def update(self, frame_count):
-        if not self.dialogue_finished:
-            if frame_count <= self.dialogue_start_frame:
-                return 
+        # --- 1. ALWAYS Update Background ---
+        self.grid_offset_z = (self.grid_offset_z + self.grid_speed_z) % self.grid_gap_z
 
-            if not self.dialogue_manager.active:
-                self.dialogue_manager.start()
-            
-            if self.dialogue_manager.active:
-                self.dialogue_manager.update()
-                if self.dialogue_manager.finished:
-                    self.dialogue_finished = True
-                    self.stage_timer = frame_count 
-                return 
+        # --- 2. DIALOGUE HANDLING (Top Priority) ---
+        if self.active_dialogue:
+            self.active_dialogue.update()
+            if self.active_dialogue.finished:
+                # If this was the post-boss dialogue, mark stage as complete
+                if self.boss_dead_dialogue_triggered:
+                    self.stage_complete = True
+                self.active_dialogue = None
+            return # Pause the rest of the stage update
 
-        self.spawn_enemies(frame_count)
-        if not self.boss_spawned and frame_count - self.stage_timer > 1800:
-            self.spawn_boss()
-            self.boss_spawned = True
+        # === If we get here, no dialogue is active, so we advance the gameplay clock ===
+        self.gameplay_frame_count += 1
 
-        if self.boss_spawned and not self.bosses:
-            self.stage_complete = True
+        # --- 3. DIALOGUE TRIGGERS ---
+        # Trigger Opening Dialogue (uses absolute frame_count once at the start)
+        if not self.opening_dialogue_triggered and frame_count > self.dialogue_start_frame:
+            self.start_dialogue(self.start_script)
+            self.opening_dialogue_triggered = True
+            # The 'return' in the block above will pause the game, so we don't need another one here.
+
+        # Trigger Post-Boss Dialogue
+        if self.boss_spawned and not self.bosses and not self.boss_dead_dialogue_triggered:
+            for bullet in self.enemy_bullets:
+                bullet.kill()
+            self.start_dialogue(self.end_script)
+            self.boss_dead_dialogue_triggered = True
+            return # Pause game immediately after triggering
+
+        # --- 4. Standard Stage Logic (runs if no dialogue is active) ---
+        if self.opening_dialogue_triggered: # Only run game logic after opening dialogue is done
+            self.spawn_enemies()
+            if not self.boss_spawned and self.gameplay_frame_count > 1800:
+                self.spawn_boss()
+                self.boss_spawned = True
 
     def draw(self, surface):
-        if self.dialogue_manager.active:
-            self.dialogue_manager.draw(surface)
+        # 1. LAYER 1: 3D Background
+        surface.fill(DEEP_BLUE_BG) 
 
-    def spawn_enemies(self, frame_count):
+        grid_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        
+        # Draw Vertical Lines
+        for i in range(-10, 20):
+            base_x = self.center_x + (i * self.grid_gap_x)
+            start_pos = (base_x, SCREEN_HEIGHT)
+            end_pos = (self.center_x, self.horizon_y)
+            pygame.draw.line(grid_surf, (*WIRE_BLUE, 100), start_pos, end_pos, 1)
+
+        # Draw Horizontal Lines
+        z_pos = self.grid_gap_z - self.grid_offset_z
+        while z_pos < 1200: 
+            if z_pos <= 10: 
+                z_pos += self.grid_gap_z
+                continue
+
+            scale = 20000 
+            projected_y = self.horizon_y + (scale / z_pos)
+            
+            if projected_y < SCREEN_HEIGHT:
+                thickness = 2 if z_pos < 400 else 1
+                alpha = min(255, int((projected_y - self.horizon_y) * 2))
+                pygame.draw.line(grid_surf, (*WIRE_BLUE, alpha), (0, projected_y), (SCREEN_WIDTH, projected_y), thickness)
+            
+            z_pos += self.grid_gap_z
+
+        surface.blit(grid_surf, (0, 0))
+
+        # 2. LAYER 2: Game Sprites
+        self.all_sprites.draw(surface)
+
+        # 3. LAYER 3: Dialogue & UI (Draw on top)
+        if self.active_dialogue:
+            self.active_dialogue.draw(surface)
+
+    def spawn_enemies(self):
         if self.wave_index < len(self.waves):
             wave = self.waves[self.wave_index]
-            if frame_count - self.stage_timer > wave["time"]:
+            if self.gameplay_frame_count > wave["time"]:
                 if wave.get("random"):
                     for _ in range(wave["count"]):
                         enemy_type = random.choice(["Tutorial_Square", "B", "C"])
@@ -384,15 +460,15 @@ class Stage1(Stage):
                         y = -50
                         bullet_pattern = random.choice([pattern_simple_shot, pattern_burst_shot, pattern_spiral_shot, pattern_emerald_shot])
                         shoot_delay_ms = random.randint(500, 2000)
-                        self.spawn_enemy(enemy_type, x, y, None, 1, bullet_pattern, frame_count, False, True, shoot_delay_ms)
+                        self.spawn_enemy(enemy_type, x, y, None, 1, bullet_pattern, self.gameplay_frame_count, False, True, shoot_delay_ms)
                 else:
                     for enemy_info in wave["enemies"]:
                         can_shoot = enemy_info.get("can_shoot", True)
                         shoot_delay_ms = enemy_info.get("shoot_delay_ms", 0)
-                        self.spawn_enemy(enemy_info["type"], enemy_info["x"], enemy_info["y"], enemy_info.get("waypoints"), enemy_info.get("speed", 1), enemy_info.get("bullet_pattern"), frame_count, enemy_info.get("fast_entry", False), can_shoot, shoot_delay_ms)
+                        self.spawn_enemy(enemy_info["type"], enemy_info["x"], enemy_info["y"], enemy_info.get("waypoints"), enemy_info.get("speed", 1), enemy_info.get("bullet_pattern"), self.gameplay_frame_count, enemy_info.get("fast_entry", False), can_shoot, shoot_delay_ms)
                 self.wave_index += 1
 
-    def spawn_enemy(self, enemy_type, x, y, waypoints, speed, bullet_pattern, frame_count, fast_entry=False, can_shoot=True, shoot_delay_ms=0):
+    def spawn_enemy(self, enemy_type, x, y, waypoints, speed, bullet_pattern, gameplay_frame_count, fast_entry=False, can_shoot=True, shoot_delay_ms=0):
         if enemy_type == "Tutorial_Square":
             enemy = Tutorial_Square(x, y, self.player, self.all_sprites, self.enemy_bullets, SCREEN_HEIGHT, waypoints=waypoints, speed=speed, bullet_pattern=bullet_pattern, fast_entry=fast_entry, can_shoot=can_shoot, shoot_delay_ms=shoot_delay_ms)
         elif enemy_type == "B":
@@ -402,7 +478,7 @@ class Stage1(Stage):
         elif enemy_type == "Miniboss":
             enemy = Miniboss(x, y, self.player, self.all_sprites, self.enemy_bullets, SCREEN_HEIGHT, waypoints=waypoints, can_shoot=can_shoot, shoot_delay_ms=shoot_delay_ms)
             self.miniboss_alive = True
-            self.miniboss_fight_start_time = frame_count
+            self.miniboss_fight_start_time = gameplay_frame_count
         self.all_sprites.add(enemy)
         self.enemies.add(enemy)
 

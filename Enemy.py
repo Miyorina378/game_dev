@@ -448,49 +448,7 @@ class Miniboss(Enemy):
                     self.pattern_state = 0
                     self.pattern_wave_count = 0
 
-class HomingMissile(Bullet):
-    def __init__(self, x, y, speedx, speedy, enemies, bosses):
-        super().__init__(x, y, speedx, speedy, "homing_missile")
-        self.start_pos = pygame.math.Vector2(x, y)
-        self.target = None
-        self.last_direction = pygame.math.Vector2(0, 0)
-        self.enemies = enemies
-        self.bosses = bosses if bosses is not None else pygame.sprite.Group()
-
-    def update(self, frame_count):
-        if self.target and self.target.alive():
-            direction = pygame.math.Vector2(self.target.rect.center) - pygame.math.Vector2(self.rect.center)
-            if direction.length() > 0:
-                direction.normalize_ip()
-                self.last_direction = direction
-        
-        if self.target and self.last_direction.length() > 0:
-            self.x += self.last_direction.x * 7
-            self.y += self.last_direction.y * 7
-        else:
-            self.x += self.speedx
-            self.y += self.speedy
-
-        self.rect.centerx = int(self.x)
-        self.rect.centery = int(self.y)
-
-        if not self.target and self.start_pos.distance_to(self.rect.center) > 300:
-            closest_target = None
-            closest_distance = float('inf')
-            
-            target_groups = [self.enemies, self.bosses]
-
-            for group in target_groups:
-                for entity in group:
-                    distance = pygame.math.Vector2(self.rect.center).distance_to(entity.rect.center)
-                    if distance < closest_distance:
-                        closest_distance = distance
-                        closest_target = entity
-            self.target = closest_target
-
-        if not pygame.display.get_surface().get_rect().colliderect(self.rect):
-            self.kill()
-
+# HOMING MISSILE REMOVED FROM HERE (moved to Items.py)
 
 def pattern_simple_shot(enemy, player, all_sprites, enemy_bullets, frame_count):
     if frame_count - enemy.last_shot > enemy.shoot_delay:

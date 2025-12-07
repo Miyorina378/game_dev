@@ -1,5 +1,6 @@
 import pygame
 import math
+import random
 
 pygame.init()
 
@@ -12,9 +13,12 @@ RED = (255, 50, 50)
 BLUE = (100, 150, 255)
 CYAN = (100, 255, 255)
 PURPLE = (200, 100, 255)
+YELLOW = (255, 255, 100)
+GREEN = (100, 255, 100)
+ORANGE = (255, 165, 0)
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Test case: Spinning Wall Pattern")
+pygame.display.set_caption("Bullet Hell: Multi-Pattern Boss")
 clock = pygame.time.Clock()
 
 class Bullet:
@@ -26,16 +30,175 @@ class Bullet:
         self.color = color
         self.size = size
         self.active = True
+        self.age = 0
+        # For wave pattern
+        self.wave_amplitude = None
+        self.wave_frequency = None
+        self.initial_angle = None
+        self.wave_axis = 'x'  # Which axis to apply wave motion to
     
     def update(self):
+        # Apply wave motion if parameters are set
+        if self.wave_amplitude is not None and self.wave_frequency is not None:
+            self.age += 1
+            angle = self.initial_angle + self.age * self.wave_frequency
+            wave_value = math.sin(angle) * self.wave_amplitude
+            
+            if self.wave_axis == 'x':
+                self.vx = wave_value
+            else:  # 'y'
+                self.vy = wave_value
+        
         self.x += self.vx
         self.y += self.vy
+        
         if self.x < -20 or self.x > WIDTH + 20 or self.y < -20 or self.y > HEIGHT + 20:
             self.active = False
     
     def draw(self, screen):
         pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.size)
         pygame.draw.circle(screen, WHITE, (int(self.x), int(self.y)), self.size - 2)
+
+class AcceleratingBullet(Bullet):
+    def __init__(self, x, y, vx, vy, color, size=5, accel=0.02):
+        super().__init__(x, y, vx, vy, color, size)
+        self.accel = accel
+    
+    def update(self):
+        # Accelerate in current direction
+        speed = math.sqrt(self.vx**2 + self.vy**2)
+        if speed > 0:
+            self.vx += (self.vx / speed) * self.accel
+            self.vy += (self.vy / speed) * self.accel
+        super().update()
+
+class HomingBullet(Bullet):
+    def __init__(self, x, y, vx, vy, color, size=5, target=None):
+        super().__init__(x, y, vx, vy, color, size)
+        self.target = target
+        self.homing_strength = 0.05
+        self.max_speed = 3
+    
+    def update(self):
+        if self.target and self.age < 120:  # Only home for 2 seconds
+            # Calculate direction to target
+            dx = self.target.x - self.x
+            dy = self.target.y - self.y
+            dist = math.sqrt(dx**2 + dy**2)
+            if dist > 0:
+                # Add homing velocity
+                self.vx += (dx / dist) * self.homing_strength
+                self.vy += (dy / dist) * self.homing_strength
+                
+                # Limit speed
+                speed = math.sqrt(self.vx**2 + self.vy**2)
+                if speed > self.max_speed:
+                    self.vx = (self.vx / speed) * self.max_speed
+                    self.vy = (self.vy / speed) * self.max_speed
+        super().update()
+
+class Background:
+    def __init__(self):
+        self.particles = []
+        self.stars = []
+        self.timer = 0
+        
+        # Create initial stars
+        for _ in range(100):
+            self.stars.append({
+                'x': random.randint(0, WIDTH),
+                'y': random.randint(0, HEIGHT),
+                'size': random.randint(1, 3),
+                'speed': random.uniform(0.2, 0.8),
+                'brightness': random.randint(100, 255)
+            })
+    
+    def update(self, boss_pattern):
+        self.timer += 1
+        
+        # Update stars - slow scrolling
+        for star in self.stars:
+            star['y'] += star['speed']
+            if star['y'] > HEIGHT:
+                star['y'] = 0
+                star['x'] = random.randint(0, WIDTH)
+        
+        # Add ambient particles based on boss pattern
+        if self.timer % 5 == 0:
+            pattern_name = boss_pattern[0]
+            
+            if pattern_name == "spiral":
+                color = CYAN
+                num = 2
+            elif pattern_name == "burst":
+                color = YELLOW
+                num = 3
+            elif pattern_name == "spinning_wall":
+                color = PURPLE
+                num = 2
+            elif pattern_name == "wave":
+                color = GREEN
+                num = 3
+            elif pattern_name == "star":
+                color = ORANGE
+                num = 2
+            elif pattern_name == "homing":
+                color = RED
+                num = 4
+            elif pattern_name == "chaos":
+                color = (random.randint(100, 255), random.randint(100, 255), random.randint(100, 255))
+                num = 5
+            else:
+                color = WHITE
+                num = 1
+            
+            for _ in range(num):
+                self.particles.append({
+                    'x': random.randint(0, WIDTH),
+                    'y': random.randint(0, 300),
+                    'vx': random.uniform(-0.5, 0.5),
+                    'vy': random.uniform(0.3, 1.5),
+                    'size': random.randint(2, 5),
+                    'color': color,
+                    'life': random.randint(60, 120),
+                    'max_life': 120
+                })
+        
+        # Update particles
+        for particle in self.particles:
+            particle['x'] += particle['vx']
+            particle['y'] += particle['vy']
+            particle['life'] -= 1
+        
+        # Remove dead particles
+        self.particles = [p for p in self.particles if p['life'] > 0]
+    
+    def draw(self, screen, boss_phase):
+        # Draw stars with twinkling effect
+        for star in self.stars:
+            twinkle = abs(math.sin(self.timer * 0.05 + star['x'] * 0.01))
+            brightness = int(star['brightness'] * twinkle)
+            color = (brightness, brightness, brightness)
+            pygame.draw.circle(screen, color, (int(star['x']), int(star['y'])), star['size'])
+        
+        # Draw particles with fade effect
+        for particle in self.particles:
+            alpha_factor = particle['life'] / particle['max_life']
+            size = int(particle['size'] * alpha_factor)
+            if size > 0:
+                # Create faded color
+                r = int(particle['color'][0] * alpha_factor)
+                g = int(particle['color'][1] * alpha_factor)
+                b = int(particle['color'][2] * alpha_factor)
+                pygame.draw.circle(screen, (r, g, b), (int(particle['x']), int(particle['y'])), size)
+        
+        # Draw phase-specific background effects
+        if boss_phase == 2:
+            # Add red vignette/glow effect for phase 2
+            for i in range(3):
+                alpha = 20 - i * 5
+                offset = i * 3
+                pygame.draw.rect(screen, (alpha, 0, 0), (offset, offset, WIDTH - offset * 2, HEIGHT - offset * 2), 2)
 
 class Player:
     def __init__(self):
@@ -70,44 +233,54 @@ class Boss:
         
         # Pattern timing variables
         self.timer = 0
-        self.pattern_state = "spin_left"  # States: spin_left, pause_left, spin_right, pause_right
-        self.state_timer = 0
+        self.pattern_index = 0
+        self.pattern_timer = 0
         self.rotation_angle = 0
+        self.phase = 1
         
-        # Pattern configuration
-        self.SPIN_LEFT_DURATION = 2.0 * FPS  # 2 seconds in frames
-        self.PAUSE_DURATION = 0.5 * FPS      # 0.5 seconds in frames
-        self.SPIN_RIGHT_DURATION = 2.0 * FPS # 2 seconds in frames
+        # Pattern sequence with durations (in seconds)
+        self.patterns = [
+            ("spiral", 4.0),
+            ("burst", 3.0),
+            ("spinning_wall", 4.0),
+            ("wave", 3.5),
+            ("star", 3.0),
+            ("homing", 4.0),
+            ("chaos", 20.0) 
+        ]
         
-    def update(self):
+        self.current_pattern = self.patterns[0]
+        
+    def update(self, player):
         self.timer += 1
-        self.state_timer += 1
+        self.pattern_timer += 1
         
-        # State machine for pattern timing
-        if self.pattern_state == "spin_left":
-            self.spinning_pattern(direction=-1)  # Counter-clockwise
-            if self.state_timer >= self.SPIN_LEFT_DURATION:
-                self.pattern_state = "pause_left"
-                self.state_timer = 0
+        # Check if it's time to switch patterns
+        pattern_duration = self.current_pattern[1] * FPS
+        if self.pattern_timer >= pattern_duration:
+            self.pattern_index = (self.pattern_index + 1) % len(self.patterns)
+            self.current_pattern = self.patterns[self.pattern_index]
+            self.pattern_timer = 0
+            self.rotation_angle = 0
         
-        elif self.pattern_state == "pause_left":
-            # Pause - no new bullets
-            if self.state_timer >= self.PAUSE_DURATION:
-                self.pattern_state = "spin_right"
-                self.state_timer = 0
-        
-        elif self.pattern_state == "spin_right":
-            self.spinning_pattern(direction=1)  # Clockwise
-            if self.state_timer >= self.SPIN_RIGHT_DURATION:
-                self.pattern_state = "pause_right"
-                self.state_timer = 0
-        
-        elif self.pattern_state == "pause_right":
-            # Pause - no new bullets
-            if self.state_timer >= self.PAUSE_DURATION:
-                self.pattern_state = "spin_left"
-                self.state_timer = 0
-                self.rotation_angle = 0  # Reset rotation for clean loop
+        # Execute current pattern
+
+        pattern_name = self.current_pattern[0]
+        if pattern_name == "spiral":
+            self.spiral_pattern()
+        elif pattern_name == "burst":
+            self.burst_pattern()
+        elif pattern_name == "spinning_wall":
+            self.spinning_wall_pattern()
+        elif pattern_name == "wave":
+            self.wave_pattern()
+        elif pattern_name == "star":
+            self.star_pattern()
+        elif pattern_name == "homing":
+            self.homing_pattern(player)
+        elif pattern_name == "chaos":
+            self.chaos_pattern(player)
+        # ------------------------
         
         # Update all bullets
         for b in self.bullets:
@@ -115,33 +288,145 @@ class Boss:
         self.bullets = [b for b in self.bullets if b.active]
         
         # Auto damage for demo
-        if self.timer % 30 == 0:
+        if self.timer % 20 == 0:
             self.hp -= 1
+        
+        # Check phase transition
+        if self.hp <= self.max_hp // 1 and self.phase == 1:
+            self.phase = 2
+            self.patterns.append(("chaos", 5.0))  # Add chaos pattern in phase 2
     
-    def spinning_pattern(self, direction):
-        """
-        Creates a spinning wall pattern - dense with dodgeable gaps
-        direction: -1 for left (counter-clockwise), 1 for right (clockwise)
-        """
-        if self.timer % 3 == 0:  # Shoot every 3 frames for balanced density
-            # Update rotation angle based on direction - MUCH slower
-            self.rotation_angle += direction * 0.015
-            
-            # Create wall with slight gaps
-            num_bullets = 20  # Slightly reduced for small gaps
-            for i in range(num_bullets):
-                angle = self.rotation_angle + (i * 2 * math.pi / num_bullets)
-                
-                # Slower speed to create a wall effect
-                speed = 1.2
+    def spiral_pattern(self):
+        """Dense spiral that expands outward"""
+        if self.timer % 4 == 0:
+            self.rotation_angle += 0.2
+            num_arms = 3
+            for i in range(num_arms):
+                angle = self.rotation_angle + (i * 2 * math.pi / num_arms)
+                speed = 1.5
                 vx = math.cos(angle) * speed
                 vy = math.sin(angle) * speed
                 
-                # Color based on direction
-                color = CYAN if direction == -1 else PURPLE
+                self.bullets.append(Bullet(
+                    self.x, self.y, vx, vy, CYAN, 6
+                ))
+    
+    def burst_pattern(self):
+        """Circular bursts with gaps"""
+        if self.timer % 30 == 0:
+            num_bullets = 16
+            gap_start = random.randint(0, num_bullets - 1)
+            gap_size = 3
+            
+            for i in range(num_bullets):
+                # Skip gap bullets
+                if gap_start <= i < gap_start + gap_size:
+                    continue
+                    
+                angle = (i * 2 * math.pi / num_bullets)
+                speed = 2.5
+                vx = math.cos(angle) * speed
+                vy = math.sin(angle) * speed
+                
+                self.bullets.append(AcceleratingBullet(
+                    self.x, self.y, vx, vy, YELLOW, 5, 0.03
+                ))
+    
+    def spinning_wall_pattern(self):
+        """Rotating wall with clear gaps"""
+        if self.timer % 5 == 0:  # Slower firing rate
+            self.rotation_angle += 0.02
+            num_bullets = 16  # Fewer bullets for bigger gaps
+            gap_indices = [4, 5, 12, 13]  # Two gaps opposite each other
+            
+            for i in range(num_bullets):
+                # Skip gap positions
+                if i in gap_indices:
+                    continue
+                    
+                angle = self.rotation_angle + (i * 2 * math.pi / num_bullets)
+                speed = 1.5  # Slightly faster to compensate for gaps
+                vx = math.cos(angle) * speed
+                vy = math.sin(angle) * speed
                 
                 self.bullets.append(Bullet(
-                    self.x, self.y, vx, vy, color, 7
+                    self.x, self.y, vx, vy, PURPLE, 6
+                ))
+    
+    def wave_pattern(self):
+        """Sine wave bullets that come from alternating sides"""
+        if self.timer % 3 == 0:
+            # Alternate sides every second
+            side = 1 if (self.timer // 60) % 2 == 0 else -1
+            
+            # Spawn from left or right edge
+            bullet_x = WIDTH + 10 if side == 1 else -10
+            bullet_y = 350 + (self.pattern_timer % 180) * 3  # Spread vertically
+            
+            # Base horizontal velocity (toward opposite side)
+            vx = -2.5 * side
+            
+            # Sine wave motion parameters
+            bullet = Bullet(bullet_x, bullet_y, vx, 0, GREEN, 6)
+            bullet.wave_amplitude = 1.5  # Vertical oscillation strength
+            bullet.wave_frequency = 0.15
+            bullet.initial_angle = self.pattern_timer * 0.1
+            bullet.wave_axis = 'y'  # Oscillate vertically while moving horizontally
+            
+            self.bullets.append(bullet)
+    
+    def star_pattern(self):
+        """Star-shaped spread that rotates"""
+        if self.timer % 20 == 0:
+            self.rotation_angle += 0.3
+            num_points = 5
+            
+            for i in range(num_points):
+                angle = self.rotation_angle + (i * 2 * math.pi / num_points)
+                
+                # Create line of bullets for each point
+                for j in range(3):
+                    speed = 1.8 + j * 0.4
+                    vx = math.cos(angle) * speed
+                    vy = math.sin(angle) * speed
+                    
+                    self.bullets.append(Bullet(
+                        self.x, self.y, vx, vy, ORANGE, 6
+                    ))
+    
+    def homing_pattern(self, player):
+        """Homing bullets that chase the player"""
+        if self.timer % 25 == 0:
+            # Launch homing bullets in a spread
+            for i in range(3):
+                angle = -math.pi/2 + (i - 1) * 0.5
+                speed = 1.0
+                vx = math.cos(angle) * speed
+                vy = math.sin(angle) * speed
+                
+                self.bullets.append(HomingBullet(
+                    self.x, self.y, vx, vy, RED, 6, player
+                ))
+    
+    def chaos_pattern(self, player):
+            """Random bullets focused generally towards the player"""
+            if self.timer % 6 == 0:
+                # 1. Calculate angle to player
+                dx = player.x - self.x
+                dy = player.y - self.y
+                target_angle = math.atan2(dy, dx)
+                
+                # 2. Add random spread (e.g., +/- 30 degrees)
+                spread = random.uniform(-0.5, 0.5) 
+                angle = target_angle + spread
+                
+                speed = random.uniform(2.0, 4.0) # Slightly faster to threaten player
+                vx = math.cos(angle) * speed
+                vy = math.sin(angle) * speed
+                
+                colors = [CYAN, PURPLE, YELLOW, GREEN, ORANGE]
+                self.bullets.append(Bullet(
+                    self.x, self.y, vx, vy, random.choice(colors), 7
                 ))
     
     def draw(self, screen):
@@ -149,8 +434,8 @@ class Boss:
         pygame.draw.circle(screen, BLUE, (int(self.x), int(self.y)), self.size)
         pygame.draw.circle(screen, WHITE, (int(self.x), int(self.y)), self.size - 8)
         
-        # Draw eye based on state
-        eye_color = RED if "spin" in self.pattern_state else WHITE
+        # Draw eye (changes color based on phase)
+        eye_color = RED if self.phase == 2 else CYAN
         pygame.draw.circle(screen, eye_color, (int(self.x), int(self.y)), 5)
         
         # Draw bullets
@@ -166,44 +451,41 @@ class Boss:
         hp_width = int((self.hp / self.max_hp) * bar_width)
         
         # Color changes based on HP
-        if self.hp > 100:
+        if self.hp > 666:
             hp_color = (100, 255, 100)
-        elif self.hp > 50:
+        elif self.hp > 333:
             hp_color = (255, 255, 100)
         else:
             hp_color = (255, 100, 100)
         
         pygame.draw.rect(screen, hp_color, (bar_x, bar_y, hp_width, bar_height))
         
-        # Draw spell card name and state
+        # Draw pattern name
         font = pygame.font.Font(None, 36)
         small_font = pygame.font.Font(None, 24)
         
-        spell_text = font.render("Barrier Sign「Rotating Wall」", True, WHITE)
+        pattern_names = {
+            "spiral": "Spiral Sign「Triple Helix」",
+            "burst": "Burst Sign「Expanding Nova」",
+            "spinning_wall": "Barrier Sign「Rotating Wall」",
+            "wave": "Wave Sign「Tidal Force」",
+            "star": "Star Sign「Pentagram」",
+            "homing": "Curse Sign「Seeking Shadow」",
+            "chaos": "Chaos Sign「Entropy」"
+        }
+        
+        spell_text = font.render(pattern_names[self.current_pattern[0]], True, WHITE)
         screen.blit(spell_text, (WIDTH // 2 - spell_text.get_width() // 2, 280))
         
-        # Show current state
-        state_display = {
-            "spin_left": "← SPINNING LEFT",
-            "pause_left": "⊗ PAUSED",
-            "spin_right": "SPINNING RIGHT →",
-            "pause_right": "⊗ PAUSED"
-        }
-        state_text = small_font.render(state_display[self.pattern_state], True, CYAN if "left" in self.pattern_state else PURPLE)
-        screen.blit(state_text, (WIDTH // 2 - state_text.get_width() // 2, 320))
-        
-        # Draw timer indicator
-        total_cycle = self.SPIN_LEFT_DURATION + self.PAUSE_DURATION + self.SPIN_RIGHT_DURATION + self.PAUSE_DURATION
-        cycle_progress = (self.timer % total_cycle) / total_cycle
-        progress_width = 300
-        progress_x = WIDTH // 2 - progress_width // 2
-        progress_y = 350
-        pygame.draw.rect(screen, WHITE, (progress_x - 2, progress_y - 2, progress_width + 4, 10), 2)
-        pygame.draw.rect(screen, CYAN, (progress_x, progress_y, int(cycle_progress * progress_width), 6))
+        # Phase indicator
+        if self.phase == 2:
+            phase_text = small_font.render("⚠ PHASE 2 ⚠", True, RED)
+            screen.blit(phase_text, (WIDTH // 2 - phase_text.get_width() // 2, 320))
 
 def main():
     player = Player()
     boss = Boss()
+    background = Background()
     running = True
     game_over = False
     victory = False
@@ -222,13 +504,15 @@ def main():
                     # Restart
                     player = Player()
                     boss = Boss()
+                    background = Background()
                     game_over = False
                     victory = False
         
         if not game_over and not victory:
             keys = pygame.key.get_pressed()
             player.update(keys)
-            boss.update()
+            boss.update(player)
+            background.update(boss.current_pattern)
             
             # Collision detection
             for b in boss.bullets:
@@ -242,6 +526,9 @@ def main():
         # Drawing
         screen.fill(BLACK)
         
+        # Draw dynamic background
+        background.draw(screen, boss.phase)
+        
         # Draw play area border
         pygame.draw.rect(screen, WHITE, (0, 300, WIDTH, HEIGHT - 300), 2)
         
@@ -249,10 +536,10 @@ def main():
         player.draw(screen)
         
         # Draw instructions
-        inst_text = small_font.render("Arrow Keys: Move | Dodge the spinning bullets!", True, WHITE)
+        inst_text = small_font.render("Arrow Keys: Move | Dodge all patterns!", True, WHITE)
         screen.blit(inst_text, (10, 10))
         
-        pattern_text = small_font.render("Pattern: Left Spin → Pause → Right Spin → Pause → Loop", True, WHITE)
+        pattern_text = small_font.render(f"Phase {boss.phase} | Pattern {boss.pattern_index + 1}/{len(boss.patterns)}", True, CYAN if boss.phase == 1 else RED)
         screen.blit(pattern_text, (10, 40))
         
         # Draw game state
